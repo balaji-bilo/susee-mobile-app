@@ -1,0 +1,11 @@
+export const base_url = 'http://192.168.1.23:5000/api/';
+// export const base_url = 'https://dvsos-backend.onrender.com/api/';
+export const login = 'auth/login';
+export const check_vehicle = 'mobile/gate-entry/check-vehicle';
+export const submit_entry = 'mobile/gate-entry';
+export const SECRET_KEY = 'gatesecurity_secure_secret_key_999!';
+export const profile = 'auth/me';
+export const submit_profile = 'auth/profile';
+export const exit = 'mobile/gate-entry/exit';
+export const forgot_password = 'auth/forgot-password';
+export const get_history = 'mobile/gate-entry/history';
