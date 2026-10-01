@@ -32,6 +32,7 @@ import { FloorJobCardsScreen } from './src/floorsupervisor/views/FloorJobCardsSc
 import { FloorJobCardViewScreen } from './src/floorsupervisor/views/FloorJobCardViewScreen.jsx';
 import { EditSelectedServicesScreen } from './src/floorsupervisor/views/EditSelectedServicesScreen.jsx';
 import { AddAdditionalWorkScreen } from './src/floorsupervisor/views/AddAdditionalWorkScreen.jsx';
+import { JobCardImagesScreen } from './src/floorsupervisor/views/JobCardImagesScreen.jsx';
 
 // Shared Storage & Tab Bar
 import { retrieveEncryptedData } from './src/common/config/storage.js';
@@ -67,34 +68,19 @@ function MainTabs({ route }) {
     loadRoleAndModule();
   }, [route.params?.role, route.params?.appModule]);
 
-  const upperRole = String(userRole || '').toUpperCase();
-  const upperModule = String(appModule || '').toUpperCase();
-
-  const isAdmin = upperRole.includes('ADMIN') || upperRole.includes('SUPERADMIN') || upperRole === 'SUPER';
-  const isFloorRole = upperModule === 'FLOOR_SUPERVISOR' || upperRole.includes('FLOOR') || upperRole.includes('SUPERVISOR') || upperRole.includes('BODY_SHOP');
-  const isGateRole = upperModule === 'GATE_SECURITY' || upperRole.includes('GATE') || upperRole.includes('SECURITY') || upperRole.includes('GUARD') || upperRole.includes('KEEPER');
-  const isJobRole = upperModule === 'JOB_CREATE' || upperRole.includes('JOB') || upperRole.includes('ADVISOR') || upperRole.includes('CREATOR');
+  const roleStrLower = String(userRole || '').toLowerCase().trim();
+  const normalizedRole = roleStrLower.replace(/\s+/g, '-');
 
   let showGateTabs = false;
   let showJobTabs = false;
   let showFloorTabs = false;
 
-  if (isAdmin) {
+  if (normalizedRole === 'gate-security') {
     showGateTabs = true;
+  } else if (normalizedRole === 'crm-team') {
     showJobTabs = true;
+  } else if (normalizedRole === 'manager' || normalizedRole === 'floor-supervisor') {
     showFloorTabs = true;
-  } else if (isFloorRole) {
-    showGateTabs = false;
-    showJobTabs = false;
-    showFloorTabs = true;
-  } else if (isGateRole) {
-    showGateTabs = true;
-    showJobTabs = false;
-    showFloorTabs = false;
-  } else {
-    showGateTabs = false;
-    showJobTabs = true;
-    showFloorTabs = false;
   }
 
   // Initial tab route based on active tabs
@@ -149,13 +135,15 @@ function MainTabs({ route }) {
           options={{ title: 'Assign' }}
         />
       )}
+      {/* Hiding Add Work tab for now as requested
       {showFloorTabs && (
         <Tab.Screen
           name="AdditionalWork"
           component={AdditionalWorkScreen}
           options={{ title: 'Add Work' }}
         />
-      )}
+      )} 
+      */}
       {showFloorTabs && (
         <Tab.Screen
           name="FloorJobCards"
@@ -187,6 +175,7 @@ export default function App() {
           <Stack.Screen name="FloorJobCardViewScreen" component={FloorJobCardViewScreen} />
           <Stack.Screen name="EditSelectedServicesScreen" component={EditSelectedServicesScreen} />
           <Stack.Screen name="AddAdditionalWorkScreen" component={AddAdditionalWorkScreen} />
+          <Stack.Screen name="JobCardImagesScreen" component={JobCardImagesScreen} />
           <Stack.Screen name="Notification" component={NotificationScreen} />
         </Stack.Navigator>
       </NavigationContainer>

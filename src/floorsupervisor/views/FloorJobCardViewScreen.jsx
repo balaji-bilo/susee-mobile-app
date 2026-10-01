@@ -8,7 +8,15 @@ import {
   StatusBar,
   SafeAreaView,
   Platform,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import axios from 'axios';
+import AudioRecorderPlayer from 'react-native-audio-recorder-player';
+import RNFS from 'react-native-fs';
+import Toast from 'react-native-simple-toast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft,
@@ -22,8 +30,20 @@ import {
   Pencil,
   ChevronDown,
   ChevronUp,
+  Mic,
+  Play,
+  Volume2,
+  MoreVertical,
+  Pause,
+  VolumeX,
+  MapPin,
+  Image as LucideImage,
 } from 'lucide-react-native';
 import { colors, fonts } from '../../common/config/theme';
+import { RupeeFormatText } from '../../common/components/RupeeFormatText';
+import { retrieveEncryptedData } from '../../common/config/storage';
+import { base_url } from '../../common/config/constant';
+import { FloorJobCardSkeleton } from '../components/FloorJobCardSkeleton';
 
 function formatVehicleNumber(num) {
   if (!num) return '';
@@ -37,21 +57,25 @@ function formatVehicleNumber(num) {
 
 function getStatusBadgeConfig(statusName) {
   const norm = (statusName || '').toLowerCase();
-  switch (norm) {
-    case 'assigned':
-      return { bg: '#E0F2FE', border: '#BAE6FD', text: '#0284C7', dot: '#0284C7' };
-    case 'in progress':
-      return { bg: '#EEF2FF', border: '#C7D2FE', text: '#4F46E5', dot: '#4F46E5' };
-    case 'completed':
-      return { bg: '#ECFDF5', border: '#A7F3D0', text: '#059669', dot: '#059669' };
-    case 'rejected':
-      return { bg: '#FEF2F2', border: '#FECACA', text: '#DC2626', dot: '#DC2626' };
-    case 'postponed':
-      return { bg: '#F1F5F9', border: '#CBD5E1', text: '#64748B', dot: '#64748B' };
-    case 'pending':
-    default:
-      return { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706', dot: '#D97706' };
+  
+  if (norm.includes('completed') || norm === 'done') {
+    return { bg: '#ECFDF5', border: '#A7F3D0', text: '#059669', dot: '#059669' };
   }
+  if (norm.includes('in progress') || norm.includes('ongoing')) {
+    return { bg: '#EEF2FF', border: '#C7D2FE', text: '#4F46E5', dot: '#4F46E5' };
+  }
+  if (norm.includes('assigned')) {
+    return { bg: '#E0F2FE', border: '#BAE6FD', text: '#0284C7', dot: '#0284C7' };
+  }
+  if (norm.includes('rejected') || norm.includes('cancelled')) {
+    return { bg: '#FEF2F2', border: '#FECACA', text: '#DC2626', dot: '#DC2626' };
+  }
+  if (norm.includes('postponed')) {
+    return { bg: '#F1F5F9', border: '#CBD5E1', text: '#64748B', dot: '#64748B' };
+  }
+  
+  // Default (Pending, etc.)
+  return { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706', dot: '#D97706' };
 }
 
 export function FloorJobCardViewScreen({ route, navigation }) {
@@ -59,6 +83,159 @@ export function FloorJobCardViewScreen({ route, navigation }) {
 
   // Accordion state for Assigned Work Item (defaults to open for first item)
   const [expandedWorkId, setExpandedWorkId] = useState('w1');
+  // Accordion state for Approvals
+  const [expandedApprovalId, setExpandedApprovalId] = useState('INIT');
+
+  // Audio Playback State
+  const [audioRecorderPlayer] = useState(() => new AudioRecorderPlayer());
+  const [playingId, setPlayingId] = useState(null);
+  const [playTime, setPlayTime] = useState('00:00');
+  const [duration, setDuration] = useState('00:00');
+  const [playProgress, setPlayProgress] = useState('0%');
+  const [isMuted, setIsMuted] = useState(false);
+
+  const toggleMute = async () => {
+    try {
+      if (isMuted) {
+        await audioRecorderPlayer.setVolume(1.0);
+        setIsMuted(false);
+      } else {
+        await audioRecorderPlayer.setVolume(0.0);
+        setIsMuted(true);
+      }
+    } catch (err) {
+      console.log('Mute error:', err);
+    }
+  };
+
+  const handleDownload = (url, approvalCode) => {
+    if (!url) {
+      Toast.show('No audio URL found', Toast.SHORT);
+      return;
+    }
+
+    Alert.alert(
+      "Download Audio",
+      "Do you want to download this voice note to your phone?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Download",
+          onPress: async () => {
+            try {
+              Toast.show('Downloading audio...', Toast.SHORT);
+              
+              let rawFileName = url.substring(url.lastIndexOf('/') + 1) || '';
+              rawFileName = rawFileName.split('?')[0]; // Strip URL parameters
+              if (!rawFileName || !rawFileName.includes('.')) {
+                rawFileName = `VoiceNote_${approvalCode || 'Audio'}.mp3`;
+              } else {
+                rawFileName = `VoiceNote_${approvalCode || 'Audio'}_${rawFileName}`;
+              }
+              const fileName = rawFileName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+
+              // Android standard downloads directory
+              const downloadDest = `${RNFS.DownloadDirectoryPath}/${fileName}`;
+
+              const result = await RNFS.downloadFile({
+                fromUrl: url,
+                toFile: downloadDest,
+              }).promise;
+              
+              if (result.statusCode === 200) {
+                if (Platform.OS === 'android') {
+                  try {
+                    await RNFS.scanFile(downloadDest);
+                  } catch (scanErr) {
+                    console.log('Scan error:', scanErr);
+                  }
+                }
+                Toast.show(`Saved to Downloads folder!`, Toast.LONG);
+              } else {
+                Toast.show(`Failed to download (Status: ${result.statusCode})`, Toast.LONG);
+              }
+            } catch (err) {
+              console.log('Download error:', err);
+              Toast.show('Error downloading file', Toast.LONG);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const onStartPlay = async (url, id) => {
+    try {
+      if (playingId) {
+        await audioRecorderPlayer.stopPlayer();
+        audioRecorderPlayer.removePlayBackListener();
+      }
+      setPlayingId(id);
+      setPlayTime('00:00');
+      setDuration('...');
+      setPlayProgress('0%');
+
+      if (!url) {
+        setPlayingId(null);
+        setDuration('00:00');
+        return;
+      }
+
+      // Download file to cache to bypass Android streaming duration limitations
+      let rawFileName = url.substring(url.lastIndexOf('/') + 1) || '';
+      rawFileName = rawFileName.split('?')[0]; // Strip URL parameters
+      const fileName = rawFileName.replace(/[^a-zA-Z0-9.\-_]/g, '_') || `audio_${id}.mp3`;
+      const localPath = `${RNFS.CachesDirectoryPath}/${fileName}`;
+
+      const fileExists = await RNFS.exists(localPath);
+      if (!fileExists) {
+        const downloadResult = await RNFS.downloadFile({
+          fromUrl: url,
+          toFile: localPath,
+        }).promise;
+        
+        if (downloadResult.statusCode !== 200) {
+          throw new Error('Failed to download audio file');
+        }
+      }
+
+      setDuration('00:00');
+      
+      await audioRecorderPlayer.startPlayer(localPath);
+      audioRecorderPlayer.addPlayBackListener((e) => {
+        setPlayTime(audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)).substring(0, 5));
+        setDuration(audioRecorderPlayer.mmssss(Math.floor(e.duration)).substring(0, 5));
+
+        let progress = 0;
+        if (e.duration > 0) {
+          progress = (e.currentPosition / e.duration) * 100;
+        }
+        setPlayProgress(`${Math.min(progress, 100)}%`);
+
+        if (e.currentPosition >= e.duration && e.duration > 0) {
+          audioRecorderPlayer.stopPlayer();
+          audioRecorderPlayer.removePlayBackListener();
+          setPlayingId(null);
+          setPlayTime('00:00');
+          setPlayProgress('0%');
+        }
+      });
+    } catch (err) {
+      console.log('Play error:', err);
+      setPlayingId(null);
+      setPlayTime('00:00');
+      setDuration('00:00');
+    }
+  };
+
+  const onPausePlay = async () => {
+    try {
+      await audioRecorderPlayer.pausePlayer();
+      setPlayingId(null);
+    } catch (err) {
+      console.log('Pause error:', err);
+    }
+  };
 
   // Fallback data matching desktop view (JC0052)
   const defaultCard = {
@@ -97,15 +274,191 @@ export function FloorJobCardViewScreen({ route, navigation }) {
         endTime: 'Not Started',
       },
     ],
+    jobProgressSteps: [
+      { id: 1, title: 'Vehicle Entry', desc: '24 Sep 2026, 09:40 AM · Gate Security', status: 'completed' },
+      { id: 2, title: 'Job Card Created', desc: '24 Sep 2026, 09:40 AM · CRM Team · ₹6,325 est.', status: 'completed' },
+      { id: 3, title: 'Mechanical Work', desc: 'Assigned to fathima · bay7009', status: 'active' },
+      { id: 4, title: 'Customer Approvals', desc: 'Pending — 3 items awaiting', status: 'active' },
+      { id: 5, title: 'Body Shop', desc: 'Body Shop Work Completed', status: 'completed' },
+      { id: 6, title: 'Vehicle Delivery', desc: 'Expected: 29 Sep 2026, 05:00 PM', status: 'pending' },
+    ]
   };
 
-  const card = navCard || defaultCard;
-
+  const [cardData, setCardData] = useState(navCard || defaultCard);
   const [servicesList, setServicesList] = useState(
-    card.selectedServices || defaultCard.selectedServices
+    navCard?.selectedServices || defaultCard.selectedServices
   );
   const [additionalWorkList, setAdditionalWorkList] = useState(
-    card.additionalWork || defaultCard.additionalWork
+    navCard?.additionalWork || defaultCard.additionalWork
+  );
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchJobCardDetail = async (isRefresh = false) => {
+    const jcId = cardData?.jobCardId || cardData?.id || navCard?.jobCardId || navCard?.id;
+    if (!jcId) {
+      setIsLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
+
+    if (isRefresh) {
+      setIsRefreshing(true);
+    }
+
+    try {
+      const token = await retrieveEncryptedData('token');
+      const res = await axios.get(`${base_url}/job-cards/detail/${jcId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.data?.success && res.data?.data) {
+        const item = res.data.data;
+        const taxRate = item.billing?.taxRate ?? item.taxRate ?? 18;
+        const servicesListRaw = item.services || [];
+
+        const formatServiceItem = (s) => {
+          const rawPrice = s.price !== undefined ? s.price : (s.rate || 0);
+          const numPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice).replace(/[^0-9.]/g, '')) || 0;
+          const statusText = s.serviceStatus?.statusName || s.serviceStatus?.statusCode || s.approvalStatus?.statusName || s.approvalStatus?.statusCode || s.status || 'Pending';
+          const approvalCode = String(s.approvalStatus?.statusCode || s.approvalStatus || (s.isAdditional ? 'PENDING' : 'APPROVED')).toUpperCase();
+          const serviceCode = String(s.serviceStatus?.statusCode || s.status || 'PENDING').toUpperCase();
+          return {
+            id: s.id,
+            name: s.serviceName || s.name || s.serviceItem?.name || 'Unknown Service',
+            qty: `x${s.quantity || 1}`,
+            status: statusText,
+            rate: `₹${numPrice.toLocaleString('en-IN')}`,
+            isAdditional: Boolean(s.isAdditional),
+            approvalStatusCode: approvalCode,
+            serviceStatusCode: serviceCode,
+            category: s.serviceItem?.category?.name || s.category || '',
+            categorySlug: s.serviceItem?.category?.slug || s.categorySlug || '',
+            isCompleted: serviceCode.includes('COMPLETED') || serviceCode.includes('DONE'),
+          };
+        };
+
+        const rawInitial = servicesListRaw.filter(s => !s.isAdditional);
+        const rawAddl = servicesListRaw.filter(s => s.isAdditional);
+
+        const selServices = servicesListRaw.map(formatServiceItem);
+        const addlServices = rawAddl.map(formatServiceItem);
+
+        const validInitial = rawInitial.filter(s => s.serviceStatus?.statusCode !== 'REJECTED' && s.serviceStatus?.statusCode !== 'CANCELLED');
+        const initialSum = validInitial.reduce((sum, s) => sum + (Number(s.price || 0) * Number(s.quantity || 1)), 0);
+
+        const validAddl = rawAddl.filter(s => s.serviceStatus?.statusCode !== 'REJECTED' && s.serviceStatus?.statusCode !== 'CANCELLED');
+        const addlSum = validAddl.reduce((sum, s) => sum + (Number(s.price || 0) * Number(s.quantity || 1)), 0);
+
+        const rawSubtotal = item.billing?.serviceSubtotal ?? item.serviceSubtotal ?? (item.totalEstimate / (1 + taxRate / 100));
+        const hasItemPrices = validInitial.some(s => Number(s.price) > 0);
+        const fallbackBase = Math.max(0, rawSubtotal - addlSum);
+        const baseSub = hasItemPrices ? initialSum : (fallbackBase > 0 ? fallbackBase : rawSubtotal);
+
+        const discount = item.billing?.discountAmount ?? item.discountAmount ?? 0;
+        const combinedSub = baseSub + addlSum;
+        const taxable = Math.max(0, combinedSub - discount);
+        const totalTax = taxable * (taxRate / 100);
+        const grandTotal = taxable + totalTax;
+
+        const serverOrigin = base_url.replace(/\/api\/?$/, '');
+
+        const formattedApprovals = (item.approvals || []).map(a => {
+          let rawVoiceNoteUrl = a.voice_note_url || a.voiceNoteUrl || '';
+          if (rawVoiceNoteUrl && !rawVoiceNoteUrl.startsWith('http') && !rawVoiceNoteUrl.startsWith('data:')) {
+            rawVoiceNoteUrl = `${serverOrigin}${rawVoiceNoteUrl.startsWith('/') ? '' : '/'}${rawVoiceNoteUrl}`;
+          }
+          return {
+            id: a.id,
+            approvalCode: a.approvalCode || `AW${a.id}`,
+            status: a.status?.statusCode || a.customerResponse || 'Pending',
+            explanation: a.mechanicExplanation || '',
+            voiceNoteUrl: rawVoiceNoteUrl,
+            createdAt: a.createdAt ? new Date(a.createdAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '',
+          };
+        });
+
+        const createdDate = item.createdAt ? new Date(item.createdAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Pending';
+        const entryDate = item.gateEntry?.entryTime ? new Date(item.gateEntry.entryTime).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : createdDate;
+        const estCostString = `₹${(item.totalEstimate || 0).toLocaleString('en-IN')}`;
+        const pendingApprovalsCount = (item.approvals || []).filter(a => String(a.statusCode || a.customerResponse || a.status || '').toUpperCase().includes('PENDING')).length;
+        const isJobDelivered = String(item.currentStatus?.statusCode || item.status || '').toUpperCase().includes('DELIVERED');
+        const mechanicName = item.technician || (item.assignedMechanics?.length > 0 ? item.assignedMechanics.map(m => m.fullName).join(', ') : 'Unassigned');
+        const bayName = item.bay?.bayName || item.bay?.bayCode || item.assignedBay?.bayName || item.assignedBay?.bayCode || 'Unassigned';
+        const expDel = item.expectedDeliveryAt ? new Date(item.expectedDeliveryAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Pending';
+
+        const statusCode = String(item.currentStatus?.statusCode || '').toUpperCase();
+        const isMechanicalPhase  = statusCode.includes('MECHANICAL');
+        const isBodyShopPhase    = statusCode.includes('BODY_SHOP');
+        const isReadyOrDelivered = statusCode.includes('READY_FOR_DELIVERY') || statusCode.includes('DELIVERED');
+
+        const hasBodyShopServices = (item.services || []).some(s => {
+          const slug = String(s.serviceItem?.category?.slug || '').toLowerCase();
+          const catName = String(s.serviceItem?.category?.name || '').toLowerCase();
+          return slug.includes('body') || catName.includes('body');
+        });
+
+        const mechanicalStatus =
+          isReadyOrDelivered || isBodyShopPhase ? 'completed' :
+          isMechanicalPhase || mechanicName !== 'Unassigned' ? 'active' : 'pending';
+
+        const bodyShopStatus =
+          !hasBodyShopServices  ? 'pending' :
+          isReadyOrDelivered    ? 'completed' :
+          isBodyShopPhase       ? 'active' : 'pending';
+
+        const approvals = item.approvals || [];
+        const approvalStatus =
+          approvals.length === 0    ? 'pending' :
+          pendingApprovalsCount > 0 ? 'active'  : 'completed';
+        const approvalDesc =
+          approvals.length === 0    ? 'No approval required' :
+          pendingApprovalsCount > 0 ? `Pending — ${pendingApprovalsCount} items awaiting` : 'All approved';
+
+        const newJobProgressSteps = [
+          { id: 1, title: 'Vehicle Entry',      desc: `${entryDate} · Gate Security`,                          status: 'completed' },
+          { id: 2, title: 'Job Card Created',   desc: `${createdDate} · CRM Team · ${estCostString} est.`,     status: 'completed' },
+          { id: 3, title: 'Mechanical Work',    desc: `Assigned to ${mechanicName} · ${bayName}`,              status: mechanicalStatus },
+          { id: 4, title: 'Customer Approvals', desc: approvalDesc,                                             status: approvalStatus },
+          { id: 5, title: 'Body Shop',          desc: hasBodyShopServices ? 'Body Shop Work' : 'Not required', status: bodyShopStatus },
+          { id: 6, title: 'Vehicle Delivery',   desc: isJobDelivered ? 'Delivered' : `Expected: ${expDel}`,    status: isJobDelivered ? 'completed' : 'pending' },
+        ];
+
+        setCardData(prev => ({
+          ...prev,
+          id: item.jobCardNo || prev.id,
+          jobCardId: item.id,
+          vehicleNo: item.vehicle?.registrationNo || prev.vehicleNo,
+          owner: item.customer?.fullName || prev.owner,
+          mobile: item.customer?.mobileNo || prev.mobile,
+          brandModel: `${item.vehicle?.brand?.name || ''} ${item.vehicle?.model || ''}`.trim() || prev.brandModel,
+          expectedDelivery: expDel,
+          status: item.currentStatus?.statusName || prev.status,
+          approvals: formattedApprovals,
+          estimateSummary: {
+            baseSubtotal: `₹${baseSub.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+            additionalWork: `₹${addlSum.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+            tax: `₹${totalTax.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+            grandTotal: `₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+          },
+          jobProgressSteps: newJobProgressSteps,
+        }));
+
+        setServicesList(selServices);
+        setAdditionalWorkList(addlServices);
+      }
+    } catch (err) {
+      console.error('Failed to fetch job card detail:', err);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchJobCardDetail();
+    }, [navCard?.id, navCard?.jobCardId])
   );
 
   useEffect(() => {
@@ -117,6 +470,8 @@ export function FloorJobCardViewScreen({ route, navigation }) {
     }
   }, [route?.params?.updatedServices, route?.params?.updatedAdditionalWork]);
 
+  const card = cardData;
+  const jobProgressSteps = card.jobProgressSteps || defaultCard.jobProgressSteps;
   const services = servicesList;
   const additionalWork = additionalWorkList;
   const estimate = card.estimateSummary || defaultCard.estimateSummary;
@@ -145,11 +500,22 @@ export function FloorJobCardViewScreen({ route, navigation }) {
         </View>
       </View>
 
-      <ScrollView
-        style={styles.detailScroll}
-        contentContainerStyle={[styles.detailScrollContent, { paddingBottom: 40 + insets.bottom }]}
-        showsVerticalScrollIndicator={false}
-      >
+      {isLoading ? (
+        <FloorJobCardSkeleton />
+      ) : (
+        <ScrollView
+          style={styles.detailScroll}
+          contentContainerStyle={[styles.detailScrollContent, { paddingBottom: 40 + insets.bottom }]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={() => fetchJobCardDetail(true)}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+        >
         {/* Main Title Container */}
         <View style={styles.detailTitleCard}>
           <View style={styles.titleAccentLine} />
@@ -157,7 +523,17 @@ export function FloorJobCardViewScreen({ route, navigation }) {
             <Text style={styles.detailTitle}>Job Card: {card.id}</Text>
             <Text style={styles.detailSubtitle}>Created on {card.created}</Text>
           </View>
+          <TouchableOpacity
+            style={styles.imagesBtn}
+            activeOpacity={0.7}
+            onPress={() => navigation?.navigate('JobCardImagesScreen', { cardId: card.id, photos: card.photos })}
+          >
+            <LucideImage size={20} color="#3B82F6" />
+          </TouchableOpacity>
         </View>
+
+        {/* JOB PROGRESS */}
+
 
         {/* 1. Vehicle & Owner Details */}
         <View style={styles.sectionCard}>
@@ -212,7 +588,47 @@ export function FloorJobCardViewScreen({ route, navigation }) {
             </View>
           </View>
         </View>
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <MapPin size={16} color="#EF4444" style={{ marginRight: 6 }} />
+            <Text style={[styles.sectionTitle, { color: '#475569', letterSpacing: 0.5 }]}>JOB PROGRESS</Text>
+          </View>
 
+          <View style={styles.timelineContainer}>
+            {jobProgressSteps.map((step, index) => {
+              const isLast = index === jobProgressSteps.length - 1;
+              let color = '#CBD5E1'; // pending
+              let lineStyle = { backgroundColor: '#E2E8F0' }; // default gray line
+
+              if (step.status === 'completed') {
+                color = '#059669'; // Emerald
+                lineStyle = { backgroundColor: '#A7F3D0' };
+              } else if (step.status === 'active') {
+                color = '#2563EB'; // Blue
+                lineStyle = { backgroundColor: '#BFDBFE' }; // light blue line
+              }
+
+              return (
+                <View key={step.id} style={styles.timelineRow}>
+                  <View style={styles.timelineIconCol}>
+                    <View style={[styles.timelineCircle, { borderColor: color }]}>
+                      {step.status !== 'pending' && (
+                        <View style={[styles.timelineDot, { backgroundColor: color }]} />
+                      )}
+                    </View>
+                    {!isLast && (
+                      <View style={[styles.timelineLine, lineStyle]} />
+                    )}
+                  </View>
+                  <View style={[styles.timelineTextCol, isLast && { paddingBottom: 0 }]}>
+                    <Text style={styles.timelineTitle}>{step.title}</Text>
+                    <Text style={styles.timelineDesc}>{step.desc}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
         {/* 2. Selected Services */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderBetween}>
@@ -226,7 +642,16 @@ export function FloorJobCardViewScreen({ route, navigation }) {
               onPress={() =>
                 navigation?.navigate('EditSelectedServicesScreen', {
                   card: { ...card, selectedServices: services },
-                  onSaveServices: (newServices) => setServicesList(newServices),
+                  onSaveServices: (newServices) => {
+                    setServicesList(newServices);
+                    setAdditionalWorkList(prevAddl =>
+                      prevAddl.map(item => {
+                        const match = newServices.find(s => s.id === item.id);
+                        return match ? { ...item, status: match.status } : item;
+                      })
+                    );
+                    fetchJobCardDetail();
+                  },
                 })
               }
             >
@@ -283,9 +708,9 @@ export function FloorJobCardViewScreen({ route, navigation }) {
                     </Text>
                   </View>
                 </View>
-                <Text style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
+                <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
                   {item.rate}
-                </Text>
+                </RupeeFormatText>
               </View>
             );
           })}
@@ -304,7 +729,20 @@ export function FloorJobCardViewScreen({ route, navigation }) {
               onPress={() =>
                 navigation?.navigate('AddAdditionalWorkScreen', {
                   card: { ...card, currentServices: services },
-                  onSaveAdditionalWork: (newItems) => setAdditionalWorkList(newItems),
+                  department: route?.params?.department || null,
+                  activeTab: route?.params?.activeTab || null,
+                  onSaveAdditionalWork: (newItems) => {
+                    setAdditionalWorkList(prev => [...prev, ...newItems]);
+                    setServicesList(prev => {
+                      const existingIds = new Set(prev.map(p => p.id));
+                      const toAdd = newItems.filter(item => !existingIds.has(item.id)).map(item => ({
+                        ...item,
+                        qty: item.qty || 'x1',
+                      }));
+                      return [...prev, ...toAdd];
+                    });
+                    fetchJobCardDetail();
+                  },
                 })
               }
             >
@@ -320,29 +758,138 @@ export function FloorJobCardViewScreen({ route, navigation }) {
             <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'right' }]}>Rate</Text>
           </View>
 
-          {additionalWork.map((item, idx) => (
-            <View
-              key={item.id || idx}
-              style={[
-                styles.tableRow,
-                idx === additionalWork.length - 1 && { borderBottomWidth: 0 },
-              ]}
-            >
-              <Text style={[styles.tableCellText, { flex: 2.5 }]}>{item.name}</Text>
-              <View style={{ flex: 1.5, alignItems: 'center' }}>
-                <View style={[styles.statusPillSmall, styles.statusPillOrange]}>
-                  <View style={[styles.smallDot, { backgroundColor: '#D97706' }]} />
-                  <Text style={[styles.statusPillTextSmall, { color: '#D97706' }]}>
-                    {item.status}
-                  </Text>
+          {additionalWork.map((item, idx) => {
+            const stBadge = getStatusBadgeConfig(item.status);
+            return (
+              <View
+                key={item.id || idx}
+                style={[
+                  styles.tableRow,
+                  idx === additionalWork.length - 1 && { borderBottomWidth: 0 },
+                ]}
+              >
+                <Text style={[styles.tableCellText, { flex: 2.5 }]}>{item.name}</Text>
+                <View style={{ flex: 1.5, alignItems: 'center' }}>
+                  <View
+                    style={[
+                      styles.statusPillSmall,
+                      {
+                        backgroundColor: stBadge.bg,
+                        borderColor: stBadge.border,
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.smallDot, { backgroundColor: stBadge.dot }]} />
+                    <Text
+                      style={[
+                        styles.statusPillTextSmall,
+                        { color: stBadge.text },
+                      ]}
+                    >
+                      {item.status || 'Pending'}
+                    </Text>
+                  </View>
                 </View>
+                <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
+                  {item.rate}
+                </RupeeFormatText>
               </View>
-              <Text style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
-                {item.rate}
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
+
+        {/* 3.5 Additional Work Messages & Voice Notes */}
+        {card.approvals && card.approvals.filter(a => a.explanation || a.voiceNoteUrl).length > 0 && (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeaderRow}>
+              <Mic size={16} color="#0D9488" style={{ marginRight: 6 }} />
+              <Text style={styles.sectionTitle}>Additional Work Messages & Voice Notes</Text>
+            </View>
+
+            {card.approvals.filter(a => a.explanation || a.voiceNoteUrl).map((approval, idx) => {
+              const itemId = approval.id || String(idx);
+              const isExpanded = expandedApprovalId === 'INIT' ? idx === 0 : expandedApprovalId === itemId;
+              
+              return (
+              <View key={itemId} style={[styles.voiceNoteCard, { marginBottom: 12 }]}>
+                <TouchableOpacity 
+                  style={[styles.voiceNoteHeader, !isExpanded && { marginBottom: 0 }]}
+                  activeOpacity={0.7}
+                  onPress={() => setExpandedApprovalId(isExpanded ? null : itemId)}
+                >
+                  <View>
+                    <Text style={styles.approvalReqText}>APPROVAL REQUEST: {approval.approvalCode}</Text>
+                    <Text style={styles.voiceNoteDate}>{approval.createdAt}</Text>
+                  </View>
+                  <View>
+                    {isExpanded ? <ChevronUp size={18} color="#64748B" /> : <ChevronDown size={18} color="#64748B" />}
+                  </View>
+                </TouchableOpacity>
+
+                {isExpanded && (
+                  <View>
+                    {approval.explanation ? (
+                      <>
+                        <Text style={styles.voiceNoteLabel}>Explanation / Message</Text>
+                        <View style={styles.voiceNoteMsgBox}>
+                          <Text style={styles.voiceNoteMsgText}>{approval.explanation}</Text>
+                        </View>
+                      </>
+                    ) : null}
+
+                    {approval.voiceNoteUrl ? (
+                      <View style={styles.audioPlayerBox}>
+                        <View style={styles.audioPlayerHeader}>
+                          <Mic size={12} color="#059669" style={{ marginRight: 4 }} />
+                          <Text style={styles.audioPlayerTitle}>Recorded Voice Note Audio:</Text>
+                        </View>
+
+                        <View style={styles.audioControlsRow}>
+                          <TouchableOpacity
+                            style={styles.playBtn}
+                            onPress={() => {
+                              const isThisPlaying = playingId === itemId;
+                              if (isThisPlaying) {
+                                onPausePlay();
+                              } else {
+                                onStartPlay(approval.voiceNoteUrl, itemId);
+                              }
+                            }}
+                          >
+                            {playingId === itemId ? (
+                              <Pause size={16} color="#0F172A" fill="#0F172A" />
+                            ) : (
+                              <Play size={16} color="#0F172A" fill="#0F172A" />
+                            )}
+                          </TouchableOpacity>
+                          <Text style={styles.audioTimeText}>
+                            {playingId === itemId ? `${playTime} / ${duration}` : '00:00 / 00:00'}
+                          </Text>
+
+                          <View style={styles.progressBarBg}>
+                            <View style={[styles.progressBarFill, { width: playingId === itemId ? playProgress : '0%' }]} />
+                          </View>
+
+                          <TouchableOpacity onPress={toggleMute} style={{ marginLeft: 8, padding: 4 }}>
+                            {isMuted ? (
+                              <VolumeX size={16} color="#0F172A" />
+                            ) : (
+                              <Volume2 size={16} color="#0F172A" />
+                            )}
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDownload(approval.voiceNoteUrl, approval.approvalCode)} style={{ marginLeft: 4, padding: 4 }}>
+                            <MoreVertical size={16} color="#0F172A" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+              </View>
+            )})}
+          </View>
+        )}
 
         {/* 4. Estimate Summary */}
         <View style={styles.sectionCard}>
@@ -358,24 +905,24 @@ export function FloorJobCardViewScreen({ route, navigation }) {
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Base Subtotal</Text>
-            <Text style={styles.summaryVal}>{estimate.baseSubtotal}</Text>
+            <RupeeFormatText style={styles.summaryVal}>{estimate.baseSubtotal}</RupeeFormatText>
           </View>
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Additional Work</Text>
-            <Text style={styles.summaryVal}>{estimate.additionalWork}</Text>
+            <RupeeFormatText style={styles.summaryVal}>{estimate.additionalWork}</RupeeFormatText>
           </View>
 
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Tax (10%)</Text>
-            <Text style={styles.summaryVal}>{estimate.tax}</Text>
+            <RupeeFormatText style={styles.summaryVal}>{estimate.tax}</RupeeFormatText>
           </View>
 
           <View style={styles.summaryDivider} />
 
           <View style={styles.summaryTotalRow}>
             <Text style={styles.grandTotalLabel}>Grand Total</Text>
-            <Text style={styles.grandTotalVal}>{estimate.grandTotal}</Text>
+            <RupeeFormatText style={styles.grandTotalVal}>{estimate.grandTotal}</RupeeFormatText>
           </View>
         </View>
 
@@ -412,9 +959,9 @@ export function FloorJobCardViewScreen({ route, navigation }) {
                     <Text style={styles.workEmpText}>{work.empName}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={[styles.statusPillSmall, styles.statusPillIndigo]}>
-                      <View style={[styles.smallDot, { backgroundColor: '#4F46E5' }]} />
-                      <Text style={[styles.statusPillTextSmall, { color: '#4F46E5' }]}>
+                    <View style={[styles.statusPillSmall, { backgroundColor: getStatusBadgeConfig(work.status).bg, borderColor: getStatusBadgeConfig(work.status).border }]}>
+                      <View style={[styles.smallDot, { backgroundColor: getStatusBadgeConfig(work.status).dot }]} />
+                      <Text style={[styles.statusPillTextSmall, { color: getStatusBadgeConfig(work.status).text }]}>
                         {work.status}
                       </Text>
                     </View>
@@ -451,6 +998,7 @@ export function FloorJobCardViewScreen({ route, navigation }) {
           })}
         </View>
       </ScrollView>
+      )}
     </View>
   );
 }
@@ -527,6 +1075,65 @@ const styles = StyleSheet.create({
     fontFamily: fonts.inter,
     color: '#64748B',
     marginTop: 2,
+  },
+  imagesBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  timelineContainer: {
+    marginTop: 6,
+    paddingHorizontal: 4,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+  },
+  timelineIconCol: {
+    width: 28,
+    alignItems: 'center',
+  },
+  timelineCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    zIndex: 2,
+  },
+  timelineDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 28,
+    marginTop: -2,
+    marginBottom: -2,
+    zIndex: 1,
+  },
+  timelineTextCol: {
+    flex: 1,
+    paddingBottom: 24,
+    paddingLeft: 12,
+  },
+  timelineTitle: {
+    fontSize: 13.5,
+    fontFamily: fonts.interBold,
+    color: '#1E293B',
+    marginBottom: 3,
+  },
+  timelineDesc: {
+    fontSize: 12,
+    fontFamily: fonts.interMedium,
+    color: '#64748B',
   },
   sectionCard: {
     backgroundColor: '#FFFFFF',
@@ -797,5 +1404,94 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: fonts.interBold,
     color: colors.primary,
+  },
+  voiceNoteCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    marginTop: 4,
+  },
+  voiceNoteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  approvalReqText: {
+    fontSize: 11,
+    fontFamily: fonts.interBold,
+    color: '#0F172A',
+  },
+  voiceNoteDate: {
+    fontSize: 10.5,
+    fontFamily: fonts.interMedium,
+    color: '#64748B',
+  },
+  voiceNoteLabel: {
+    fontSize: 11,
+    fontFamily: fonts.interMedium,
+    color: '#475569',
+    marginBottom: 4,
+  },
+  voiceNoteMsgBox: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 6,
+    padding: 10,
+    marginBottom: 12,
+  },
+  voiceNoteMsgText: {
+    fontSize: 12.5,
+    fontFamily: fonts.inter,
+    color: '#334155',
+  },
+  audioPlayerBox: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 8,
+    padding: 10,
+  },
+  audioPlayerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  audioPlayerTitle: {
+    fontSize: 11,
+    fontFamily: fonts.interBold,
+    color: '#059669',
+  },
+  audioControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  playBtn: {
+    marginRight: 8,
+  },
+  audioTimeText: {
+    fontSize: 11,
+    fontFamily: fonts.interMedium,
+    color: '#0F172A',
+    marginRight: 12,
+  },
+  progressBarBg: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#CBD5E1',
+    borderRadius: 2,
+  },
+  progressBarFill: {
+    width: '0%',
+    height: '100%',
+    backgroundColor: '#0F172A',
+    borderRadius: 2,
   },
 });

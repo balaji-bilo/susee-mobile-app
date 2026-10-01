@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   TextInput,
   StatusBar,
   SafeAreaView,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import {
   Search,
@@ -22,6 +25,10 @@ import {
 } from 'lucide-react-native';
 import { colors, fonts } from '../../common/config/theme';
 import { FloorSupervisorHeader } from '../components/FloorSupervisorHeader';
+import { useFocusEffect } from '@react-navigation/native';
+import axios from 'axios';
+import { base_url, mobile_additional_work_list } from '../../common/config/constant';
+import { retrieveEncryptedData } from '../../common/config/storage';
 
 function formatVehicleNumber(num) {
   if (!num) return '';
@@ -34,6 +41,31 @@ function formatVehicleNumber(num) {
 }
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const CardSkeleton = () => {
+  return (
+    <View style={[styles.newCard, { padding: 0, marginBottom: 9 }]}>
+      <View style={[styles.cardTopHeader, { backgroundColor: '#F8FAFC' }]}>
+        <View style={styles.cardHeaderLeft}>
+          <View style={{ width: 60, height: 20, backgroundColor: '#E2E8F0', borderRadius: 4 }} />
+          <View style={{ width: 50, height: 20, backgroundColor: '#E2E8F0', borderRadius: 4, marginLeft: 6 }} />
+        </View>
+        <View style={{ width: 70, height: 20, backgroundColor: '#E2E8F0', borderRadius: 10 }} />
+      </View>
+      <View style={styles.cardBody}>
+        <View style={styles.vehicleCustomerRow}>
+          <View style={{ width: 100, height: 26, backgroundColor: '#F1F5F9', borderRadius: 4 }} />
+          <View style={{ width: 120, height: 32, backgroundColor: '#F1F5F9', borderRadius: 16 }} />
+        </View>
+        <View style={[styles.servicesBox, { height: 60, backgroundColor: '#F8FAFC', borderColor: '#F1F5F9', borderWidth: 1 }]} />
+        <View style={styles.cardFooter}>
+          <View style={{ width: 80, height: 20, backgroundColor: '#F1F5F9', borderRadius: 4 }} />
+          <View style={{ width: 100, height: 20, backgroundColor: '#F1F5F9', borderRadius: 4 }} />
+        </View>
+      </View>
+    </View>
+  );
+};
 
 export function AdditionalWorkScreen() {
   const insets = useSafeAreaInsets();
@@ -49,77 +81,226 @@ export function AdditionalWorkScreen() {
   ];
 
   // Requests data showing current additional work statuses
-  const [requests] = useState([
-    {
-      id: 'AW913171',
-      jobCard: 'JC0035',
-      vehicleNo: 'TN01AB1234',
-      customer: 'Anui',
-      initial: 'A',
-      services: 'Brake shoe, Brake wire, Engine oil change',
-      amount: '₹4,550',
-      requestedAt: '21 Sep 2026, 05:06 PM',
-      status: 'Pending',
-    },
-    {
-      id: 'AW774172',
-      jobCard: 'JC0034',
-      vehicleNo: 'TN65CH1234',
-      customer: 'Jack',
-      initial: 'J',
-      services: 'Armrest installation',
-      amount: '₹350',
-      requestedAt: '21 Sep 2026, 04:00 PM',
-      status: 'Pending',
-    },
-    {
-      id: 'AW525663',
-      jobCard: 'JC0033',
-      vehicleNo: 'TN47K2348',
-      customer: 'Vicky',
-      initial: 'V',
-      services: 'Armrest',
-      amount: '₹350',
-      requestedAt: '08 Sep 2026, 05:53 PM',
-      status: 'Pending',
-    },
-    {
-      id: 'AW183302',
-      jobCard: 'JC0033',
-      vehicleNo: 'TN47K2348',
-      customer: 'Vicky',
-      initial: 'V',
-      services: 'Side Mirror change, Brake wire',
-      amount: '₹900',
-      requestedAt: '03 Sep 2026, 05:35 PM',
-      status: 'Approved',
-    },
-    {
-      id: 'AW304343',
-      jobCard: 'JC0023',
-      vehicleNo: 'TN58HV0112',
-      customer: 'Vicky',
-      initial: 'V',
-      services: 'Front wheel tyre change, left side',
-      amount: '₹2,199',
-      requestedAt: '20 Aug 2026, 06:11 PM',
-      status: 'Rejected',
-    },
-  ]);
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [tabCounts, setTabCounts] = useState({ ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 });
+  const [refreshing, setRefreshing] = useState(false);
 
-  const filteredRequests = requests.filter((req) => {
-    const matchesSearch =
-      req.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      req.jobCard.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      req.vehicleNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      req.customer.toLowerCase().includes(searchQuery.toLowerCase());
+  const fetchRequests = async (pageNum, isRefresh = false) => {
+    try {
+      if (pageNum === 1 && !refreshing) setLoading(true);
+      else if (!refreshing) setLoadingMore(true);
 
-    const matchesStatus =
-      selectedStatusFilter === 'ALL' ||
-      req.status.toUpperCase() === selectedStatusFilter;
+      const token = await retrieveEncryptedData('token');
+      const response = await axios.get(`${base_url}${mobile_additional_work_list}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          page: pageNum,
+          limit: 10,
+          search: searchQuery,
+          status: selectedStatusFilter
+        }
+      });
 
-    return matchesSearch && matchesStatus;
-  });
+      if (response.data && response.data.success && response.data.data) {
+        if (response.data.data.counts) {
+          setTabCounts(response.data.data.counts);
+        }
+
+        if (response.data.data.requests) {
+          const formatted = response.data.data.requests.map(req => ({
+            id: req.awId,
+            jobCard: req.jobCardId,
+            vehicleNo: req.vehicleReg,
+            customer: req.customerName,
+            initial: req.customerInitials,
+            services: Array.isArray(req.requestedServices) ? req.requestedServices.join(', ') : req.requestedServices,
+            amount: req.estimatedCost,
+            requestedAt: req.date,
+            status: req.status
+          }));
+
+          if (isRefresh || pageNum === 1) {
+            setRequests(formatted);
+          } else {
+            setRequests(prev => {
+              const existingIds = new Set(prev.map(p => p.id));
+              const newItems = formatted.filter(f => !existingIds.has(f.id));
+              return [...prev, ...newItems];
+            });
+          }
+
+          if (formatted.length < 10) {
+            setHasMore(false);
+          } else {
+            setHasMore(true);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching additional work:', error);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setPage(1);
+    fetchRequests(1, true);
+  };
+
+  const isFirstMount = useRef(true);
+  const flatListRef = useRef(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      setSelectedStatusFilter('ALL');
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({ animated: false, offset: 0 });
+      }
+    }, [])
+  );
+
+  useEffect(() => {
+    setPage(1);
+    fetchRequests(1, true);
+  }, [selectedStatusFilter]);
+
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    const delayDebounceFn = setTimeout(() => {
+      setPage(1);
+      fetchRequests(1, true);
+    }, 400);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
+
+  const handleLoadMore = () => {
+    if (!loading && !loadingMore && hasMore) {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      fetchRequests(nextPage);
+    }
+  };
+
+  const renderFooter = () => {
+    if (!loadingMore) return null;
+    return (
+      <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+        <ActivityIndicator size="small" color={colors.primary} />
+      </View>
+    );
+  };
+
+  const renderItem = ({ item }) => {
+    const statusTheme = getStatusColor(item.status);
+    const StatusIcon = statusTheme.Icon;
+    const serviceItems = typeof item.services === 'string' ? item.services.split(', ') : item.services;
+
+    return (
+      <TouchableOpacity
+        style={styles.newCard}
+        activeOpacity={0.9}
+      >
+        {/* Top Header Strip inside Card */}
+        <View style={[styles.cardTopHeader, { backgroundColor: statusTheme.bg }]}>
+          <View style={styles.cardHeaderLeft}>
+            <View style={styles.reqIdPill}>
+              <FileText size={11} color="#475569" style={{ marginRight: 4 }} />
+              <Text style={styles.reqIdText}>{item.id}</Text>
+            </View>
+            <View style={styles.jobTagPill}>
+              <Text style={styles.jobTagText}>#{item.jobCard}</Text>
+            </View>
+          </View>
+
+          {/* Status Pill */}
+          <View
+            style={[
+              styles.statusPill,
+              { backgroundColor: statusTheme.pillBg, borderColor: statusTheme.pillBorder },
+            ]}
+          >
+            <StatusIcon size={12} color={statusTheme.primary} />
+            <Text style={[styles.statusText, { color: statusTheme.text }]}>
+              {item.status}
+            </Text>
+          </View>
+        </View>
+
+        {/* Card Content Section */}
+        <View style={styles.cardBody}>
+          {/* Vehicle Number & Customer Info Row */}
+          <View style={styles.vehicleCustomerRow}>
+            {/* IND License Plate */}
+            <View style={styles.indPlateContainer}>
+              <View style={styles.indBlueBox}>
+                <View style={styles.indDot} />
+                <Text style={styles.indText}>IND</Text>
+              </View>
+              <View style={styles.plateNumberBox}>
+                <Text style={styles.plateNumberText}>
+                  {formatVehicleNumber(item.vehicleNo)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Customer Profile Pill */}
+            <View style={styles.customerPill}>
+              <View style={styles.avatarCircle}>
+                <Text style={styles.avatarInitial}>{item.initial}</Text>
+              </View>
+              <View style={styles.customerTextCol}>
+                <Text style={styles.customerLabel}>CUSTOMER</Text>
+                <Text style={styles.customerName}>{item.customer}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Requested Services Box */}
+          <View style={styles.servicesBox}>
+            <View style={styles.servicesHeader}>
+              <Wrench size={12} color="#64748B" style={{ marginRight: 5 }} />
+              <Text style={styles.servicesHeaderLabel}>REQUESTED SERVICES</Text>
+            </View>
+
+            <View style={styles.servicesWrap}>
+              {serviceItems.map((svc, idx) => (
+                <View key={idx} style={styles.serviceChip}>
+                  <View style={styles.serviceDot} />
+                  <Text style={styles.serviceChipText}>{svc}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* Card Footer: Cost & Request Date */}
+          <View style={styles.cardFooter}>
+            <View style={styles.costCol}>
+              <Text style={styles.costLabel}>ESTIMATED COST</Text>
+              <Text style={styles.costVal}>
+                <Text style={{ fontFamily: fonts.inter }}>₹</Text>{item.amount}
+              </Text>
+            </View>
+
+            <View style={styles.timeCol}>
+              <Calendar size={12} color="#64748B" style={{ marginRight: 4 }} />
+              <Text style={styles.timeText}>{item.requestedAt}</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -185,10 +366,7 @@ export function AdditionalWorkScreen() {
           >
             {tabs.map((tab) => {
               const isActive = selectedStatusFilter === tab.key;
-              const count =
-                tab.key === 'ALL'
-                  ? requests.length
-                  : requests.filter((r) => r.status.toUpperCase() === tab.key).length;
+              const count = tabCounts[tab.key] || 0;
 
               return (
                 <TouchableOpacity
@@ -224,114 +402,39 @@ export function AdditionalWorkScreen() {
         </View>
 
         {/* Work Requests Card List */}
-        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]} showsVerticalScrollIndicator={false}>
-          {filteredRequests.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <FilePlus size={48} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No work requests found</Text>
-            </View>
-          ) : (
-            filteredRequests.map((item) => {
-              const statusTheme = getStatusColor(item.status);
-              const StatusIcon = statusTheme.Icon;
-              const serviceItems = item.services.split(', ');
-
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.newCard}
-                  activeOpacity={0.9}
-                >
-                  {/* Top Header Strip inside Card */}
-                  <View style={[styles.cardTopHeader, { backgroundColor: statusTheme.bg }]}>
-                    <View style={styles.cardHeaderLeft}>
-                      <View style={styles.reqIdPill}>
-                        <FileText size={11} color="#475569" style={{ marginRight: 4 }} />
-                        <Text style={styles.reqIdText}>{item.id}</Text>
-                      </View>
-                      <View style={styles.jobTagPill}>
-                        <Text style={styles.jobTagText}>#{item.jobCard}</Text>
-                      </View>
-                    </View>
-
-                    {/* Status Pill */}
-                    <View
-                      style={[
-                        styles.statusPill,
-                        { backgroundColor: statusTheme.pillBg, borderColor: statusTheme.pillBorder },
-                      ]}
-                    >
-                      <StatusIcon size={12} color={statusTheme.primary} />
-                      <Text style={[styles.statusText, { color: statusTheme.text }]}>
-                        {item.status}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Card Content Section */}
-                  <View style={styles.cardBody}>
-                    {/* Vehicle Number & Customer Info Row */}
-                    <View style={styles.vehicleCustomerRow}>
-                      {/* IND License Plate */}
-                      <View style={styles.indPlateContainer}>
-                        <View style={styles.indBlueBox}>
-                          <View style={styles.indDot} />
-                          <Text style={styles.indText}>IND</Text>
-                        </View>
-                        <View style={styles.plateNumberBox}>
-                          <Text style={styles.plateNumberText}>
-                            {formatVehicleNumber(item.vehicleNo)}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* Customer Profile Pill */}
-                      <View style={styles.customerPill}>
-                        <View style={styles.avatarCircle}>
-                          <Text style={styles.avatarInitial}>{item.initial}</Text>
-                        </View>
-                        <View style={styles.customerTextCol}>
-                          <Text style={styles.customerLabel}>CUSTOMER</Text>
-                          <Text style={styles.customerName}>{item.customer}</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {/* Requested Services Box */}
-                    <View style={styles.servicesBox}>
-                      <View style={styles.servicesHeader}>
-                        <Wrench size={12} color="#64748B" style={{ marginRight: 5 }} />
-                        <Text style={styles.servicesHeaderLabel}>REQUESTED SERVICES</Text>
-                      </View>
-
-                      <View style={styles.servicesWrap}>
-                        {serviceItems.map((svc, idx) => (
-                          <View key={idx} style={styles.serviceChip}>
-                            <View style={styles.serviceDot} />
-                            <Text style={styles.serviceChipText}>{svc}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-
-                    {/* Card Footer: Cost & Request Date */}
-                    <View style={styles.cardFooter}>
-                      <View style={styles.costCol}>
-                        <Text style={styles.costLabel}>ESTIMATED COST</Text>
-                        <Text style={styles.costVal}>{item.amount}</Text>
-                      </View>
-
-                      <View style={styles.timeCol}>
-                        <Calendar size={12} color="#64748B" style={{ marginRight: 4 }} />
-                        <Text style={styles.timeText}>{item.requestedAt}</Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })
-          )}
-        </ScrollView>
+        {loading && page === 1 ? (
+          <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]} showsVerticalScrollIndicator={false}>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </ScrollView>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={requests}
+            keyExtractor={(item, index) => item.id + '_' + index.toString()}
+            renderItem={renderItem}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
+            showsVerticalScrollIndicator={false}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={renderFooter}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[colors.primary]}
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <FilePlus size={48} color="#CBD5E1" />
+                <Text style={styles.emptyText}>No work requests found</Text>
+              </View>
+            }
+          />
+        )}
       </View>
     </View>
   );

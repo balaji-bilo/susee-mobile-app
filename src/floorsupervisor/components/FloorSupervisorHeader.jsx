@@ -1,14 +1,36 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Bell } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import Toast from 'react-native-simple-toast';
 import { fonts, colors } from '../../common/config/theme';
+import { retrieveEncryptedData } from '../../common/config/storage';
 
-export function FloorSupervisorHeader({ title, subtitle, navigation: propNavigation }) {
+export function FloorSupervisorHeader({ title, subtitle: propSubtitle, navigation: propNavigation }) {
   const hookNavigation = useNavigation();
   const navigation = propNavigation || hookNavigation;
+  const [dynamicSubtitle, setDynamicSubtitle] = useState(propSubtitle || '');
+
+  useEffect(() => {
+    async function fetchRole() {
+      try {
+        const role = await retrieveEncryptedData('roleName');
+        if (role) {
+          const formattedRole = role
+            .replace(/[-_]/g, ' ')
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+          
+          setDynamicSubtitle(`${formattedRole} Workspace`);
+        }
+      } catch (error) {
+        console.error('Error fetching role for header:', error);
+      }
+    }
+    fetchRole();
+  }, []);
 
   const insets = useSafeAreaInsets();
   const safeTop = insets.top > 0 ? insets.top : (Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0);
@@ -26,7 +48,7 @@ export function FloorSupervisorHeader({ title, subtitle, navigation: propNavigat
     <View style={[styles.headerRow, { paddingTop: topPadding }]}>
       <View style={styles.headerTitleCol}>
         <Text style={styles.screenTitle}>{title}</Text>
-        {subtitle ? <Text style={styles.screenSubtitle}>{subtitle}</Text> : null}
+        {dynamicSubtitle ? <Text style={styles.screenSubtitle}>{dynamicSubtitle}</Text> : null}
       </View>
 
       {/* Notification Bell Icon */}

@@ -10,7 +10,9 @@ import {
   Modal,
   Pressable,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
+import Toast from 'react-native-simple-toast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft,
@@ -22,6 +24,10 @@ import {
   User,
 } from 'lucide-react-native';
 import { colors, fonts } from '../../common/config/theme';
+import { RupeeFormatText } from '../../common/components/RupeeFormatText';
+import axios from 'axios';
+import { base_url } from '../../common/config/constant';
+import { retrieveEncryptedData } from '../../common/config/storage';
 
 const STATUS_OPTIONS = [
   {
@@ -93,17 +99,47 @@ function getStatusStyle(statusName) {
 export function EditSelectedServicesScreen({ route, navigation }) {
   const { card, onSaveServices } = route?.params || {};
 
-  const defaultServices = card?.selectedServices || [
-    { id: '1', name: 'Armrest', qty: 'x1', status: 'In Progress', rate: '₹350' },
-    { id: '2', name: 'Door Dent', qty: 'x1', status: 'Pending', rate: '₹1,000' },
-  ];
+  const defaultServices = card?.selectedServices || [];
 
   const [servicesList, setServicesList] = useState(
     JSON.parse(JSON.stringify(defaultServices))
   );
 
+  const [dynamicStatuses, setDynamicStatuses] = useState(STATUS_OPTIONS);
+  const [isUpdating, setIsUpdating] = useState(false);
+
   // Active dropdown modal state
   const [activeItemIndex, setActiveItemIndex] = useState(null);
+
+  React.useEffect(() => {
+    const fetchStatuses = async () => {
+      try {
+        const token = await retrieveEncryptedData('token');
+        const response = await axios.get(`${base_url}/job-cards/service-statuses/list`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.data?.success && response.data?.data) {
+          const apiStatuses = response.data.data.map(s => {
+            const defaultStyle = getStatusStyle(s.statusCode);
+            return {
+              label: s.statusName,
+              value: s.statusCode,
+              bgColor: defaultStyle.bgColor,
+              borderColor: defaultStyle.borderColor,
+              textColor: defaultStyle.textColor,
+              dotColor: defaultStyle.dotColor,
+            };
+          });
+          if (apiStatuses.length > 0) {
+            setDynamicStatuses(apiStatuses);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch service statuses:', error);
+      }
+    };
+    fetchStatuses();
+  }, []);
 
   const handleSelectStatus = (index, newStatus) => {
     const updated = [...servicesList];
@@ -112,14 +148,109 @@ export function EditSelectedServicesScreen({ route, navigation }) {
     setActiveItemIndex(null);
   };
 
-  const handleSaveChanges = () => {
-    if (onSaveServices) {
-      onSaveServices(servicesList);
+  const handleSaveChanges = async () => {
+    const jcId = card?.jobCardId || card?.id;
+    if (!jcId) return;
+
+    // 1. Check if originally completed service was modified
+    for (const current of servicesList) {
+      const original = defaultServices.find(s => s.id === current.id);
+      if (original) {
+        const origCode = String(original.serviceStatusCode || original.status || '').toUpperCase().replace(/\s+/g, '_');
+        const currCode = String(current.status || '').toUpperCase().replace(/\s+/g, '_');
+        const origIsCompleted = original.isCompleted || origCode.includes('COMPLETED');
+        
+        if (origIsCompleted && origCode !== currCode) {
+          Toast.show('Completed service status cannot be changed', Toast.SHORT);
+          return;
+        }
+      }
     }
-    navigation?.navigate('FloorJobCardViewScreen', {
-      updatedServices: servicesList,
-      cardId: card?.id,
-    });
+
+    // 2. Additional work must be customer approved before it can be started / progressed
+    for (const s of servicesList) {
+      const stNorm = String(s.status || '').toUpperCase().replace(/\s+/g, '_');
+      const isProgressing = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'ONGOING'].some(st => stNorm.includes(st));
+      if (s.isAdditional && isProgressing) {
+        const approvalCode = String(s.approvalStatusCode || '').toUpperCase();
+        const isApproved = approvalCode === 'APPROVED' || approvalCode === 'CUSTOMER_APPROVED';
+        if (!isApproved) {
+          Toast.show('Additional work must be customer approved before it can be started', Toast.LONG);
+          return;
+        }
+      }
+    }
+
+    // 3. Department sequence check (Body Shop cannot start before Mechanical is complete)
+    for (const targetService of servicesList) {
+      const stNorm = String(targetService.status || '').toUpperCase().replace(/\s+/g, '_');
+      const isProgressing = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'ONGOING'].some(st => stNorm.includes(st));
+
+      const isBodyShop = (
+        (targetService.category || targetService.categorySlug || targetService.name || '').toLowerCase().includes('body') ||
+        (targetService.category || targetService.categorySlug || targetService.name || '').toLowerCase().includes('paint') ||
+        (targetService.category || targetService.categorySlug || targetService.name || '').toLowerCase().includes('dent')
+      );
+
+      if (isBodyShop && isProgressing) {
+        const incompleteMechanical = servicesList.some(s => {
+          const sIsBody = (
+            (s.category || s.categorySlug || s.name || '').toLowerCase().includes('body') ||
+            (s.category || s.categorySlug || s.name || '').toLowerCase().includes('paint') ||
+            (s.category || s.categorySlug || s.name || '').toLowerCase().includes('dent')
+          );
+          if (sIsBody) return false;
+          const sStatus = String(s.status || '').toUpperCase();
+          return !sStatus.includes('COMPLETED') && !sStatus.includes('POSTPONED') && !sStatus.includes('REJECTED') && !sStatus.includes('CANCELLED');
+        });
+
+        if (incompleteMechanical) {
+          Toast.show('Previous service stage must be completed before updating this service status', Toast.LONG);
+          return;
+        }
+      }
+    }
+
+    // 4. Validate In Progress without mechanic assigned
+    const hasAssignedMechanic = Boolean(card?.mechanic && card.mechanic !== 'Unassigned') || Boolean(card?.technician) || (card?.assignedMechanics && card.assignedMechanics.length > 0) || (card?.workAssignments && card.workAssignments.some(a => !!a.assignedUserId || !!a.assignedUser));
+    for (const s of servicesList) {
+      const stNorm = String(s.status || '').toUpperCase().replace(/\s+/g, '_');
+      if (stNorm.includes('IN_PROGRESS') && !hasAssignedMechanic) {
+        Toast.show(`Cannot mark service ${s.name} as In Progress without an assigned mechanic`, Toast.LONG);
+        return;
+      }
+    }
+
+    setIsUpdating(true);
+    try {
+      const token = await retrieveEncryptedData('token');
+      const payload = {
+        services: servicesList.map(s => ({
+          id: s.id,
+          status: s.status
+        }))
+      };
+      
+      const res = await axios.put(`${base_url}/mobile/job-cards/update-services/${jcId}`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (res.data?.success) {
+        Toast.show('Job Card services updated successfully!', Toast.SHORT);
+        if (onSaveServices) {
+          onSaveServices(servicesList);
+        }
+        navigation?.goBack();
+      } else {
+        Toast.show(res.data?.message || 'Failed to update services', Toast.LONG);
+      }
+    } catch (error) {
+      console.error('Update failed:', error);
+      const errMsg = error.response?.data?.message || error.message || 'Failed to update job card services';
+      Toast.show(errMsg, Toast.LONG);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const activeService =
@@ -198,7 +329,7 @@ export function EditSelectedServicesScreen({ route, navigation }) {
                     <View style={styles.metaRow}>
                       <Text style={styles.metaBadge}>Qty: {item.qty || 'x1'}</Text>
                       <Text style={styles.metaDot}>•</Text>
-                      <Text style={styles.metaPrice}>{item.rate}</Text>
+                      <RupeeFormatText style={styles.metaPrice}>{item.rate}</RupeeFormatText>
                     </View>
                   </View>
 
@@ -248,12 +379,17 @@ export function EditSelectedServicesScreen({ route, navigation }) {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.saveBtn}
+          style={[styles.saveBtn, isUpdating && { opacity: 0.7 }]}
           activeOpacity={0.8}
           onPress={handleSaveChanges}
+          disabled={isUpdating}
         >
-          <Save size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-          <Text style={styles.saveBtnText}>Update Job Card</Text>
+          {isUpdating ? (
+            <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
+          ) : (
+            <Save size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+          )}
+          <Text style={styles.saveBtnText}>{isUpdating ? 'Updating...' : 'Update Job Card'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -279,7 +415,7 @@ export function EditSelectedServicesScreen({ route, navigation }) {
             <View style={styles.modalDivider} />
 
             <View style={styles.optionsList}>
-              {STATUS_OPTIONS.map(opt => {
+              {dynamicStatuses.map(opt => {
                 const isSelected =
                   activeService?.status?.toLowerCase() === opt.value.toLowerCase();
 

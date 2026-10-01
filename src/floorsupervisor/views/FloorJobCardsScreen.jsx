@@ -8,6 +8,9 @@ import {
   TextInput,
   StatusBar,
   SafeAreaView,
+  ActivityIndicator,
+  RefreshControl,
+  FlatList,
 } from 'react-native';
 import {
   Search,
@@ -27,8 +30,13 @@ import {
 } from 'lucide-react-native';
 import { colors, fonts } from '../../common/config/theme';
 import { AssignTechnicianModal } from '../components/AssignTechnicianModal';
+import { RupeeFormatText } from '../../common/components/RupeeFormatText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FloorSupervisorHeader } from '../components/FloorSupervisorHeader';
+import axios from 'axios';
+import { base_url, mobile_floor_job_cards } from '../../common/config/constant';
+import { retrieveEncryptedData } from '../../common/config/storage';
+import { useFocusEffect } from '@react-navigation/native';
 
 function formatVehicleNumber(num) {
   if (!num) return '';
@@ -43,148 +51,290 @@ function formatVehicleNumber(num) {
 export function FloorJobCardsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState('MECHANICAL');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('ALL');
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [selectedCardForAssign, setSelectedCardForAssign] = useState(null);
 
   const tabs = [
+    { key: 'ALL', label: 'All' },
     { key: 'MECHANICAL', label: 'Mechanical' },
     { key: 'BODY_SHOP', label: 'Body Shop' },
+    { key: 'READY_FOR_DELIVERY', label: 'Ready for Delivery' },
   ];
 
-  // Sample data matching Job Cards
-  const [jobCards, setJobCards] = useState([
-    {
-      id: 'JC0052',
-      vehicleNo: 'TN78UI9012',
-      owner: 'Sutha',
-      initial: 'S',
-      mobile: '8523691476',
-      brandModel: 'Tata Tata567 Tata67',
-      expectedDelivery: '04 Sep 2026, 03:48 PM',
-      serviceType: 'SERVICE',
-      status: 'Mechanical In Progress',
-      mechanic: 'sakthivel',
-      bay: 'Test001',
-      estCost: '₹1,485',
-      created: '23 Sep 2026, 02:09 PM',
-      selectedServices: [
-        { id: '1', name: 'Armrest', qty: 'x1', status: 'In Progress', rate: '₹350' },
-        { id: '2', name: 'Door Dent', qty: 'x1', status: 'Pending', rate: '₹1,000' },
-      ],
-      additionalWork: [
-        { id: 'a1', name: 'Brake shoe', status: 'Pending', rate: '₹800' },
-      ],
-      estimateSummary: {
-        baseSubtotal: '₹550',
-        additionalWork: '₹800',
-        tax: '₹135',
-        grandTotal: '₹1,485',
-      },
-      assignedWork: [
-        {
-          id: 'w1',
-          serviceName: 'Armrest',
-          empName: 'huka - EMP0012',
-          status: 'In Progress',
-          startTime: '23 Sep 2026, 02:48 PM',
-          endTime: 'Not Started',
-        },
-      ],
-    },
-    {
-      id: 'JC0044',
-      vehicleNo: 'TN89KL7890',
-      owner: 'Kilso',
-      initial: 'K',
-      mobile: '7412589630',
-      brandModel: 'Hyundai i20 Asta',
-      expectedDelivery: '24 Sep 2026, 05:00 PM',
-      serviceType: 'PERIODIC SERVICE',
-      status: 'Body Shop Assignment Pending',
-      mechanic: 'Unassigned',
-      bay: 'Unassigned',
-      estCost: '₹8,580',
-      created: '23 Sep 2026, 11:34 AM',
-      selectedServices: [
-        { id: '1', name: 'Bumper Painting', qty: 'x1', status: 'Pending', rate: '₹4,500' },
-        { id: '2', name: 'Fender Repair', qty: 'x1', status: 'Pending', rate: '₹3,200' },
-      ],
-      additionalWork: [],
-      estimateSummary: {
-        baseSubtotal: '₹7,700',
-        additionalWork: '₹0',
-        tax: '₹880',
-        grandTotal: '₹8,580',
-      },
-      assignedWork: [],
-    },
-    {
-      id: 'JC0043',
-      vehicleNo: 'TN00HJ6789',
-      owner: 'Kings',
-      initial: 'K',
-      mobile: '7415823690',
-      status: 'Body Shop In Progress',
-      mechanic: 'Unassigned',
-      bay: 'Unassigned',
-      estCost: '₹6,160',
-      created: '23 Sep 2026, 11:24 AM',
-    },
-    {
-      id: 'JC0041',
-      vehicleNo: 'TN90AD6789',
-      owner: 'Jiya',
-      initial: 'J',
-      mobile: '8523697412',
-      status: 'Approved',
-      mechanic: 'Unassigned',
-      bay: 'Unassigned',
-      estCost: '₹3,410',
-      created: '23 Sep 2026, 10:56 AM',
-    },
-    {
-      id: 'JC0035',
-      vehicleNo: 'TN01AB1234',
-      owner: 'Anui',
-      initial: 'A',
-      mobile: '9638527412',
-      status: 'Mechanical Assigned',
-      mechanic: 'sakthivel',
-      bay: 'Test001',
-      estCost: '₹374',
-      created: '21 Sep 2026, 04:55 PM',
-    },
-    {
-      id: 'JC0034',
-      vehicleNo: 'TN65CH1234',
-      owner: 'Jack',
-      initial: 'J',
-      mobile: '9638527410',
-      status: 'Mechanical Assigned',
-      mechanic: 'sakthivel',
-      bay: 'Test002',
-      estCost: '₹396',
-      created: '21 Sep 2026, 03:54 PM',
-    },
-  ]);
+  const [jobCards, setJobCards] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(5);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  const fetchJobCards = async (isRefresh = false) => {
+    try {
+      if (!isRefresh) setIsLoading(true);
+      const token = await retrieveEncryptedData('token');
+      const response = await axios.get(`${base_url}${mobile_floor_job_cards}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 1000 }
+      });
+
+      if (response.data.success) {
+        const data = response.data.data;
+        if (data && data.length > 0) {
+          console.log('Raw API Response Data (First Item):', JSON.stringify(data[0], null, 2));
+        }
+        const formatted = data.map((item) => {
+          return {
+            id: item.jobCardNo,
+            jobCardId: item.id,
+            vehicleNo: item.vehicle?.registrationNo || '',
+            owner: item.customer?.fullName || '',
+            initial: item.customer?.fullName?.[0] || 'U',
+            mobile: item.customer?.mobileNo || '',
+            brandModel: `${item.vehicle?.brand?.name || ''} ${item.vehicle?.model || ''}`.trim(),
+            expectedDelivery: item.expectedDeliveryAt ? new Date(item.expectedDeliveryAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '',
+            serviceType: item.serviceType?.name || (typeof item.serviceType === 'string' ? item.serviceType : 'SERVICE'),
+            workType: item.workType?.name || (typeof item.workType === 'string' ? item.workType : 'Both'),
+            status: item.currentStatus?.statusName || 'Pending',
+            mechanic: item.technician || (item.assignedMechanics?.length > 0 ? item.assignedMechanics.map(m => m.fullName).join(', ') : 'Unassigned'),
+            bay: item.bay?.bayName || item.bay?.bayCode || item.assignedBay?.bayName || item.assignedBay?.bayCode || 'Unassigned',
+            estCost: `₹${(item.totalEstimate || 0).toLocaleString('en-IN')}`,
+            created: item.createdAt ? new Date(item.createdAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '',
+            workAssignments: item.workAssignments || [],
+            assignmentHistory: item.assignmentHistory || [],
+            selectedServices: (item.services || []).map(s => ({
+              id: s.id,
+              name: s.serviceName || s.serviceItem?.name || 'Unknown Service',
+              qty: `x${s.quantity || 1}`,
+              status: s.serviceStatus?.statusName || s.serviceStatus?.statusCode || 'Pending',
+              rate: `₹${(Number(s.price) || 0).toLocaleString('en-IN')}`,
+              isAdditional: Boolean(s.isAdditional),
+              approvalStatusCode: String(s.approvalStatus?.statusCode || s.approvalStatus || (s.isAdditional ? 'PENDING' : 'APPROVED')).toUpperCase(),
+              serviceStatusCode: String(s.serviceStatus?.statusCode || s.status || 'PENDING').toUpperCase(),
+              category: s.serviceItem?.category?.name || s.category || '',
+              categorySlug: s.serviceItem?.category?.slug || s.categorySlug || '',
+              isCompleted: String(s.serviceStatus?.statusCode || s.status || '').toUpperCase().includes('COMPLETED'),
+            })),
+            additionalWork: (item.services?.filter(s => s.isAdditional) || []).map(s => ({
+              id: s.id,
+              name: s.serviceName || s.serviceItem?.name || 'Unknown Service',
+              qty: `x${s.quantity || 1}`,
+              status: s.serviceStatus?.statusName || s.serviceStatus?.statusCode || 'Pending',
+              rate: `₹${(Number(s.price) || 0).toLocaleString('en-IN')}`,
+              isAdditional: true,
+              approvalStatusCode: String(s.approvalStatus?.statusCode || s.approvalStatus || 'PENDING').toUpperCase(),
+              serviceStatusCode: String(s.serviceStatus?.statusCode || s.status || 'PENDING').toUpperCase(),
+              category: s.serviceItem?.category?.name || s.category || '',
+              categorySlug: s.serviceItem?.category?.slug || s.categorySlug || '',
+              isCompleted: String(s.serviceStatus?.statusCode || s.status || '').toUpperCase().includes('COMPLETED'),
+            })),
+            estimateSummary: (() => {
+              const taxRate = item.billing?.taxRate ?? item.taxRate ?? 18;
+              const servicesList = item.services || [];
+
+              const validInitial = servicesList.filter(s => !s.isAdditional && s.serviceStatus?.statusCode !== 'REJECTED' && s.serviceStatus?.statusCode !== 'CANCELLED');
+              const initialSum = validInitial.reduce((sum, s) => sum + (Number(s.price || 0) * Number(s.quantity || 1)), 0);
+
+              const validAddl = servicesList.filter(s => s.isAdditional && s.serviceStatus?.statusCode !== 'REJECTED' && s.serviceStatus?.statusCode !== 'CANCELLED');
+              const addlSum = validAddl.reduce((sum, s) => sum + (Number(s.price || 0) * Number(s.quantity || 1)), 0);
+
+              const rawSubtotal = item.billing?.serviceSubtotal ?? item.serviceSubtotal ?? (item.totalEstimate / (1 + taxRate / 100));
+              const hasItemPrices = validInitial.some(s => Number(s.price) > 0);
+
+              const fallbackBase = Math.max(0, rawSubtotal - addlSum);
+              const baseSub = hasItemPrices ? initialSum : (fallbackBase > 0 ? fallbackBase : rawSubtotal);
+
+              const discount = item.billing?.discountAmount ?? item.discountAmount ?? 0;
+              const combinedSub = baseSub + addlSum;
+              const taxable = Math.max(0, combinedSub - discount);
+              const totalTax = taxable * (taxRate / 100);
+              const grandTotal = taxable + totalTax;
+
+              return {
+                baseSubtotal: `₹${baseSub.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+                additionalWork: `₹${addlSum.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+                tax: `₹${totalTax.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+                grandTotal: `₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+              };
+            })(),
+            assignedWork: (item.assignmentHistory || item.workAssignments || []).map(a => ({
+              id: a.id,
+              serviceName: a.service?.serviceName || a.service?.category?.name || 'Unknown',
+              empName: a.assignedUser ? (a.assignedUser.employeeCode ? `${a.assignedUser.fullName} - ${a.assignedUser.employeeCode}` : a.assignedUser.fullName) : 'Unassigned',
+              status: a.status?.statusName || a.status?.statusCode || (typeof a.status === 'string' ? a.status : (a.completedAt ? 'Completed' : 'Assigned')),
+              startTime: a.startedAt ? new Date(a.startedAt).toLocaleString('en-US', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Not Started',
+              endTime: a.completedAt ? new Date(a.completedAt).toLocaleString('en-US', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Not Completed',
+            })),
+            approvals: (item.approvals || []).map(a => {
+              let rawVoiceNoteUrl = a.voice_note_url || a.voiceNoteUrl || '';
+              if (rawVoiceNoteUrl && !rawVoiceNoteUrl.startsWith('http')) {
+                const serverOrigin = base_url.replace(/\/api\/?$/, '');
+                rawVoiceNoteUrl = `${serverOrigin}${rawVoiceNoteUrl.startsWith('/') ? '' : '/'}${rawVoiceNoteUrl}`;
+              }
+              return {
+                id: a.id,
+                approvalCode: a.approvalCode || `AW${Math.floor(Math.random() * 100000)}`,
+                status: a.status?.statusCode || a.customerResponse || 'Pending',
+                explanation: a.mechanicExplanation || '',
+                voiceNoteUrl: rawVoiceNoteUrl,
+                createdAt: a.createdAt ? new Date(a.createdAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '',
+              };
+            }),
+            jobProgressSteps: (() => {
+              const createdDate = item.createdAt ? new Date(item.createdAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Pending';
+              const entryDate = item.gateEntry?.entryTime ? new Date(item.gateEntry.entryTime).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : createdDate;
+              const estCostString = `₹${(item.totalEstimate || 0).toLocaleString('en-IN')}`;
+              const pendingApprovalsCount = (item.approvals || []).filter(a => String(a.statusCode || a.customerResponse || a.status || '').toUpperCase().includes('PENDING')).length;
+              const isJobDelivered = String(item.currentStatus?.statusCode || item.status || '').toUpperCase().includes('DELIVERED');
+              const mechanicName = item.technician || (item.assignedMechanics?.length > 0 ? item.assignedMechanics.map(m => m.fullName).join(', ') : 'Unassigned');
+              const bayName = item.bay?.bayName || item.bay?.bayCode || item.assignedBay?.bayName || item.assignedBay?.bayCode || 'Unassigned';
+              const expDel = item.expectedDeliveryAt ? new Date(item.expectedDeliveryAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Pending';
+
+              // Use the real job card status code from deriveJobCardStatus() on the backend
+              const statusCode = String(item.currentStatus?.statusCode || '').toUpperCase();
+              const isMechanicalPhase  = statusCode.includes('MECHANICAL');
+              const isBodyShopPhase    = statusCode.includes('BODY_SHOP');
+              const isReadyOrDelivered = statusCode.includes('READY_FOR_DELIVERY') || statusCode.includes('DELIVERED');
+
+              // Does this job have any body-shop category services?
+              const hasBodyShopServices = (item.services || []).some(s => {
+                const slug = String(s.serviceItem?.category?.slug || '').toLowerCase();
+                const catName = String(s.serviceItem?.category?.name || '').toLowerCase();
+                return slug.includes('body') || catName.includes('body');
+              });
+
+              // Mechanical: completed once job moves past it; active while in mechanical; pending if not started
+              const mechanicalStatus =
+                isReadyOrDelivered || isBodyShopPhase ? 'completed' :
+                isMechanicalPhase || mechanicName !== 'Unassigned' ? 'active' : 'pending';
+
+              // Body Shop: pending (grayed) if no body-shop services exist on this job
+              const bodyShopStatus =
+                !hasBodyShopServices  ? 'pending' :
+                isReadyOrDelivered    ? 'completed' :
+                isBodyShopPhase       ? 'active' : 'pending';
+
+              // Customer Approvals: pending if no approvals at all (not falsely green)
+              const approvals = item.approvals || [];
+              const approvalStatus =
+                approvals.length === 0    ? 'pending' :
+                pendingApprovalsCount > 0 ? 'active'  : 'completed';
+              const approvalDesc =
+                approvals.length === 0    ? 'No approval required' :
+                pendingApprovalsCount > 0 ? `Pending — ${pendingApprovalsCount} items awaiting` : 'All approved';
+
+              return [
+                { id: 1, title: 'Vehicle Entry',      desc: `${entryDate} · Gate Security`,                          status: 'completed' },
+                { id: 2, title: 'Job Card Created',   desc: `${createdDate} · CRM Team · ${estCostString} est.`,     status: 'completed' },
+                { id: 3, title: 'Mechanical Work',    desc: `Assigned to ${mechanicName} · ${bayName}`,              status: mechanicalStatus },
+                { id: 4, title: 'Customer Approvals', desc: approvalDesc,                                             status: approvalStatus },
+                { id: 5, title: 'Body Shop',          desc: hasBodyShopServices ? 'Body Shop Work' : 'Not required', status: bodyShopStatus },
+                { id: 6, title: 'Vehicle Delivery',   desc: isJobDelivered ? 'Delivered' : `Expected: ${expDel}`,    status: isJobDelivered ? 'completed' : 'pending' },
+              ];
+            })(),
+            photos: (() => {
+              const rawPhotos = [
+                ...(Array.isArray(item?.photos) ? item.photos : []),
+                ...(Array.isArray(item?.media) ? item.media : []),
+                ...(Array.isArray(item?.mediaFiles) ? item.mediaFiles : []),
+                ...(Array.isArray(item?.vehicle?.mediaFiles) ? item.vehicle.mediaFiles : []),
+                ...(Array.isArray(item?.gateEntry?.mediaFiles) ? item.gateEntry.mediaFiles : [])
+              ];
+
+              const serverOrigin = base_url.replace(/\/api\/?$/, '');
+              return rawPhotos.map(p => {
+                let url = p?.fileUrl || p?.mediaUrl || p?.url || p?.blobUrl || '';
+                if (url) {
+                  url = url.replace(/\\/g, '/'); // Fix Windows backslashes
+                  if (!url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+                    url = `${serverOrigin}${url.startsWith('/') ? '' : '/'}${url}`;
+                  }
+                  url = url.replace(/ /g, '%20'); // Handle spaces WITHOUT double-encoding SAS tokens
+                }
+                return {
+                  id: p?.id || Math.random().toString(),
+                  url: url,
+                  category: p?.category || p?.name || 'Unknown',
+                  fileName: p?.fileName || p?.originalname || p?.name || ''
+                };
+              }).filter(p => p.url); // filter out empties
+            })(),
+          };
+        });
+        setJobCards(formatted);
+        setVisibleCount(5);
+      }
+    } catch (error) {
+      console.log('Error fetching floor job cards:', error);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchJobCards();
+    }, [])
+  );
+
+  const onRefresh = () => {
+    setIsRefreshing(true);
+    fetchJobCards(true);
+  };
+
+  React.useEffect(() => {
+    setVisibleCount(5);
+  }, [searchQuery, selectedStatusFilter]);
+
+  const handleLoadMore = () => {
+    if (visibleCount < filteredCards.length && !isLoadingMore) {
+      setIsLoadingMore(true);
+      setTimeout(() => {
+        setVisibleCount(prev => prev + 5);
+        setIsLoadingMore(false);
+      }, 500);
+    }
+  };
+
+  const getDeptAssignment = (assignments, deptAliases) => {
+    if (!assignments || !Array.isArray(assignments)) return { mechanic: null, bay: null };
+    const deptAssignments = assignments.filter(a => {
+      const slug = a.service?.category?.slug?.toLowerCase() || '';
+      const name = a.service?.category?.name?.toLowerCase() || '';
+      return deptAliases.some(alias => slug.includes(alias) || name.includes(alias));
+    });
+    const active = deptAssignments.find(a => !a.completedAt) || deptAssignments[0];
+    if (!active) return { mechanic: null, bay: null };
+    return {
+      mechanic: active.assignedUser?.fullName || active.assignedMechanic?.fullName || null,
+      bay: active.bay?.bayName || active.bay?.bayCode || null,
+    };
+  };
 
   const getTabCount = (key) => {
-    if (key === 'BODY_SHOP') {
-      return jobCards.filter((c) => {
-        const s = (c.status || '').toUpperCase();
-        const st = (c.serviceType || '').toUpperCase();
-        return s.includes('BODY') || st.includes('BODY');
-      }).length;
+    if (key === 'ALL') return jobCards.length;
+    if (key === 'READY_FOR_DELIVERY') {
+      return jobCards.filter((c) => (c.status || '').toUpperCase().includes('READY')).length;
     }
-    if (key === 'MECHANICAL') {
-      return jobCards.filter((c) => {
-        const s = (c.status || '').toUpperCase();
-        const st = (c.serviceType || '').toUpperCase();
-        return !(s.includes('BODY') || st.includes('BODY'));
-      }).length;
-    }
-    return jobCards.length;
+
+    return jobCards.filter((c) => {
+      const s = (c.status || '').toUpperCase();
+      const st = (c.serviceType || '').toUpperCase();
+      const isDeliveryOrReject = s.includes('DELIVER') || s.includes('READY') || s.includes('REJECT');
+      const isBodyShop = s.includes('BODY') || st.includes('BODY');
+
+      const assignments = c.workAssignments || c.assignmentHistory || [];
+
+      if (key === 'MECHANICAL') {
+        const mechInfo = getDeptAssignment(assignments, ['mechanical', 'mechanic', 'floor']);
+        return !isBodyShop && !isDeliveryOrReject && mechInfo.mechanic !== null;
+      }
+      if (key === 'BODY_SHOP') {
+        const bodyInfo = getDeptAssignment(assignments, ['body', 'paint', 'denting']);
+        return isBodyShop && !isDeliveryOrReject && bodyInfo.mechanic !== null;
+      }
+      return false;
+    }).length;
   };
 
   const filteredCards = jobCards.filter((card) => {
@@ -196,23 +346,47 @@ export function FloorJobCardsScreen({ navigation }) {
 
     const s = (card.status || '').toUpperCase();
     const st = (card.serviceType || '').toUpperCase();
+    const isReadyForDelivery = s.includes('READY');
     const isBodyShop = s.includes('BODY') || st.includes('BODY');
+    const isDeliveryOrReject = s.includes('DELIVER') || s.includes('READY') || s.includes('REJECT');
+
+    const assignments = card.workAssignments || card.assignmentHistory || [];
+    const mechInfo = getDeptAssignment(assignments, ['mechanical', 'mechanic', 'floor']);
+    const bodyInfo = getDeptAssignment(assignments, ['body', 'paint', 'denting']);
 
     let matchesStatus = true;
-    if (selectedStatusFilter === 'MECHANICAL') {
-      matchesStatus = !isBodyShop;
+    if (selectedStatusFilter === 'ALL') {
+      matchesStatus = true;
+    } else if (selectedStatusFilter === 'READY_FOR_DELIVERY') {
+      matchesStatus = isReadyForDelivery;
+    } else if (selectedStatusFilter === 'MECHANICAL') {
+      matchesStatus = !isBodyShop && !isDeliveryOrReject && mechInfo.mechanic !== null;
     } else if (selectedStatusFilter === 'BODY_SHOP') {
-      matchesStatus = isBodyShop;
+      matchesStatus = isBodyShop && !isDeliveryOrReject && bodyInfo.mechanic !== null;
     }
 
     return matchesSearch && matchesStatus;
   });
 
   const getStatusColor = (status) => {
+    if (status.includes('Ready for Delivery')) return { bg: '#EFF6FF', text: '#2563EB', border: '#BFDBFE' };
     if (status.includes('Pending')) return { bg: '#EEF2FF', text: colors.primary, border: '#C7D2FE' };
     if (status.includes('Progress')) return { bg: '#FFFBEB', text: '#D97706', border: '#FDE68A' };
     if (status.includes('Approved')) return { bg: '#ECFDF5', text: '#059669', border: '#A7F3D0' };
     return { bg: '#F8FAFC', text: '#475569', border: '#E2E8F0' };
+  };
+
+  const getWorkTypeStyle = (type) => {
+    if (!type) return null;
+    const t = type.toLowerCase();
+    if (t === 'both') {
+      return { bg: '#F3E8FF', text: '#9333EA', border: '#E9D5FF' };
+    } else if (t === 'mechanic') {
+      return { bg: '#EFF6FF', text: '#2563EB', border: '#BFDBFE' };
+    } else if (t === 'body shop') {
+      return { bg: '#FEF2F2', text: '#DC2626', border: '#FECACA' };
+    }
+    return { bg: '#F1F5F9', text: '#475569', border: '#E2E8F0' };
   };
 
   const handleOpenAssignModal = (card) => {
@@ -306,26 +480,64 @@ export function FloorJobCardsScreen({ navigation }) {
         </View>
 
         {/* Job Cards List */}
-        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]} showsVerticalScrollIndicator={false}>
-          {filteredCards.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <FileText size={48} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No matching job cards found</Text>
-            </View>
-          ) : (
-            filteredCards.map((item) => {
+        {isLoading ? (
+          <View style={styles.centerLoadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Loading Job Cards...</Text>
+          </View>
+        ) : filteredCards.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <FileText size={48} color="#CBD5E1" />
+            <Text style={styles.emptyText}>No matching job cards found</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filteredCards.slice(0, visibleCount)}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={[colors.primary]} />
+            }
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.2}
+            ListFooterComponent={() =>
+              isLoadingMore ? (
+                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              ) : null
+            }
+            renderItem={({ item }) => {
               const statusStyle = getStatusColor(item.status);
+              const assignments = item.workAssignments || item.assignmentHistory || [];
+
+              let displayMechanic = item.mechanic;
+              let displayBay = item.bay;
+
+              if (selectedStatusFilter === 'MECHANICAL') {
+                const mechInfo = getDeptAssignment(assignments, ['mechanical', 'mechanic', 'floor']);
+                displayMechanic = mechInfo.mechanic || 'Unassigned';
+                displayBay = mechInfo.bay || 'Unassigned';
+              } else if (selectedStatusFilter === 'BODY_SHOP') {
+                const bodyInfo = getDeptAssignment(assignments, ['body', 'paint', 'denting']);
+                displayMechanic = bodyInfo.mechanic || 'Unassigned';
+                displayBay = bodyInfo.bay || 'Unassigned';
+              }
+
               return (
                 <TouchableOpacity
-                  key={item.id}
                   style={styles.card}
                   activeOpacity={0.88}
-                  onPress={() =>
+                  onPress={() => {
+                    console.log('List Page Clicked Item (Mapped Data):', JSON.stringify(item, null, 2));
                     navigation?.navigate('FloorJobCardViewScreen', {
                       card: item,
                       jobCardId: item.id,
-                    })
-                  }
+                      department: selectedStatusFilter === 'BODY_SHOP' ? 'body-shop' : (selectedStatusFilter === 'MECHANICAL' ? 'mechanical' : null),
+                      activeTab: selectedStatusFilter,
+                    });
+                  }}
                 >
                   <View style={styles.cardHeader}>
                     {/* IND License Plate */}
@@ -351,19 +563,24 @@ export function FloorJobCardsScreen({ navigation }) {
                   {/* Horizontal Divider Line with Space */}
                   <View style={styles.cardDivider} />
 
-                  {/* Status Badge Row (No Regular Service text) */}
+                  {/* Badges Row (Addl. Work and Work Type) */}
                   <View style={styles.statusRow}>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: statusStyle.bg, borderColor: statusStyle.border },
-                      ]}
-                    >
-                      <View style={[styles.statusDot, { backgroundColor: statusStyle.text }]} />
-                      <Text style={[styles.statusText, { color: statusStyle.text }]}>
-                        {item.status}
-                      </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {item.additionalWork && item.additionalWork.length > 0 && (
+                        <View style={styles.addlWorkBadge}>
+                          <Text style={styles.addlWorkText}>Addl. Work</Text>
+                        </View>
+                      )}
                     </View>
+
+                    {item.workType && (() => {
+                      const wtStyle = getWorkTypeStyle(item.workType);
+                      return (
+                        <View style={[styles.workTypeBadge, { backgroundColor: wtStyle.bg, borderColor: wtStyle.border }]}>
+                          <Text style={[styles.workTypeText, { color: wtStyle.text }]}>{item.workType}</Text>
+                        </View>
+                      );
+                    })()}
                   </View>
 
                   {/* Owner & Mobile */}
@@ -390,13 +607,13 @@ export function FloorJobCardsScreen({ navigation }) {
                     <View style={styles.tagCol}>
                       <Text style={styles.detailLabel}>MECHANIC</Text>
                       <TouchableOpacity
-                        style={[styles.tagBadge, item.mechanic !== 'Unassigned' && styles.tagBadgeActive]}
+                        style={[styles.tagBadge, displayMechanic !== 'Unassigned' && styles.tagBadgeActive]}
                         activeOpacity={0.7}
                         onPress={() => handleOpenAssignModal(item)}
                       >
-                        <Wrench size={11} color={item.mechanic !== 'Unassigned' ? colors.primary : '#94A3B8'} />
-                        <Text style={[styles.tagText, item.mechanic !== 'Unassigned' && styles.tagTextActive]}>
-                          {item.mechanic}
+                        <Wrench size={11} color={displayMechanic !== 'Unassigned' ? colors.primary : '#94A3B8'} />
+                        <Text style={[styles.tagText, displayMechanic !== 'Unassigned' && styles.tagTextActive]}>
+                          {displayMechanic}
                         </Text>
                       </TouchableOpacity>
                     </View>
@@ -404,15 +621,30 @@ export function FloorJobCardsScreen({ navigation }) {
                     <View style={styles.tagCol}>
                       <Text style={styles.detailLabel}>BAY</Text>
                       <TouchableOpacity
-                        style={[styles.tagBadge, item.bay !== 'Unassigned' && styles.tagBadgeActiveGreen]}
+                        style={[styles.tagBadge, displayBay !== 'Unassigned' && styles.tagBadgeActiveGreen]}
                         activeOpacity={0.7}
                         onPress={() => handleOpenAssignModal(item)}
                       >
-                        <Layers size={11} color={item.bay !== 'Unassigned' ? '#059669' : '#94A3B8'} />
-                        <Text style={[styles.tagText, item.bay !== 'Unassigned' && styles.tagTextGreen]}>
-                          {item.bay}
+                        <Layers size={11} color={displayBay !== 'Unassigned' ? '#059669' : '#94A3B8'} />
+                        <Text style={[styles.tagText, displayBay !== 'Unassigned' && styles.tagTextGreen]}>
+                          {displayBay}
                         </Text>
                       </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Status Badge (Moved below Mechanic and Bay) */}
+                  <View style={{ marginBottom: 10 }}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: statusStyle.bg, borderColor: statusStyle.border, alignSelf: 'flex-start' },
+                      ]}
+                    >
+                      <View style={[styles.statusDot, { backgroundColor: statusStyle.text }]} />
+                      <Text style={[styles.statusText, { color: statusStyle.text }]} numberOfLines={2}>
+                        {item.status}
+                      </Text>
                     </View>
                   </View>
 
@@ -420,7 +652,7 @@ export function FloorJobCardsScreen({ navigation }) {
                   <View style={styles.cardFooter}>
                     <View>
                       <Text style={styles.costLabel}>ESTIMATED COST</Text>
-                      <Text style={styles.costVal}>{item.estCost}</Text>
+                      <RupeeFormatText style={styles.costVal}>{item.estCost}</RupeeFormatText>
                     </View>
 
                     <View style={styles.timeCol}>
@@ -430,15 +662,17 @@ export function FloorJobCardsScreen({ navigation }) {
                   </View>
                 </TouchableOpacity>
               );
-            })
-          )}
-        </ScrollView>
+            }}
+          />
+        )}
 
         {/* Assign Technician Modal Popup */}
         <AssignTechnicianModal
           visible={assignModalVisible}
           onClose={() => setAssignModalVisible(false)}
           jobCardNumber={selectedCardForAssign?.id || 'JC0044'}
+          jobCardId={selectedCardForAssign?.jobCardId || selectedCardForAssign?.id}
+          department={selectedStatusFilter === 'BODY_SHOP' ? 'body-shop' : 'mechanical'}
           onAssignSuccess={handleAssignSuccess}
         />
       </View>
@@ -696,6 +930,27 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: fonts.interSemiBold,
   },
+  addlWorkBadge: {
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  addlWorkText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontFamily: fonts.interBold,
+  },
+  workTypeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  workTypeText: {
+    fontSize: 10.5,
+    fontFamily: fonts.interBold,
+  },
   detailsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -793,6 +1048,18 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontFamily: fonts.interMedium,
     color: '#64748B',
+  },
+  centerLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+  },
+  loadingText: {
+    fontSize: 14,
+    fontFamily: fonts.interMedium,
+    color: '#64748B',
+    marginTop: 10,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -1128,3 +1395,5 @@ const styles = StyleSheet.create({
     color: '#64748B',
   },
 });
+
+export default FloorJobCardsScreen;

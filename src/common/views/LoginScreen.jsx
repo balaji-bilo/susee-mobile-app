@@ -51,29 +51,23 @@ export function LoginScreen({ navigation }) {
 
     setLoading(true);
 
-    const isFloorStatic = username.trim().toLowerCase().includes('floor') || username.trim().toLowerCase().includes('supervisor');
-
     try {
+      let appModule = 'MOBILE_APP'; // Default module
+
+      // The backend will reject 'mobile' for roles that require specific platforms
+      // We loop over the allowed headers to find the one that succeeds without a 403
       let response;
-      let appModule = 'JOB_CREATE';
+      let loginSuccess = false;
+      let lastError;
+      const platforms = [
+        'mobile',
+        'mobile-manager',
+        'mobile-floor-supervisor',
+        'mobile-crm-team',
+        'mobile-gate-security'
+      ];
 
-      if (isFloorStatic) {
-        appModule = 'FLOOR_SUPERVISOR';
-      }
-
-      try {
-        response = await axios.post(`${base_url}${login}`, {
-          emailId: username.trim(),
-          password: password
-        }, {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-client-platform': isFloorStatic ? 'mobile-floor' : 'mobile-crm'
-          }
-        });
-        if (!isFloorStatic) appModule = 'JOB_CREATE';
-      } catch (crmErr) {
-        console.log('mobile-crm header login failed, trying mobile-gate header...');
+      for (const platform of platforms) {
         try {
           response = await axios.post(`${base_url}${login}`, {
             emailId: username.trim(),
@@ -81,34 +75,19 @@ export function LoginScreen({ navigation }) {
           }, {
             headers: {
               'Content-Type': 'application/json',
-              'x-client-platform': 'mobile-gate'
+              'x-client-platform': platform
             }
           });
-          appModule = 'GATE_SECURITY';
-        } catch (gateErr) {
-          if (isFloorStatic) {
-            // Static Floor Supervisor fallback login
-            console.log('Static Floor Supervisor login activated');
-            response = {
-              data: {
-                success: true,
-                data: {
-                  token: 'static_floor_supervisor_token',
-                  user: {
-                    _id: 'floor_sup_001',
-                    fullName: 'Sakthivel (Floor Supervisor)',
-                    emailId: username.trim(),
-                    mobileNo: '9876543210',
-                    role: { name: 'FLOOR_SUPERVISOR' }
-                  }
-                }
-              }
-            };
-            appModule = 'FLOOR_SUPERVISOR';
-          } else {
-            throw gateErr;
-          }
+          loginSuccess = true;
+          break; // Exit loop if login is successful
+        } catch (error) {
+          lastError = error;
+          console.log(`Login failed for platform: ${platform} with error: ${error.message}`);
         }
+      }
+
+      if (!loginSuccess) {
+        throw lastError; // This will throw the 403 error to be caught by the outer catch block
       }
 
       setLoading(false);
@@ -119,8 +98,32 @@ export function LoginScreen({ navigation }) {
         console.log('login token:', token);
 
         const userRole = user?.role?.name || user?.role || user?.roleName || user?.type || user?.roleType || '';
+        const roleStrLower = String(userRole).toLowerCase().trim();
         const roleStr = String(userRole).toUpperCase();
-        if (roleStr.includes('FLOOR') || roleStr.includes('SUPERVISOR') || roleStr.includes('BODY_SHOP')) {
+        const userStr = JSON.stringify(user || {}).toUpperCase();
+        const emailStr = String(username).toUpperCase();
+
+        const allowedRoles = [
+          'gate-security',
+          'crm-team',
+          'manager',
+          'floor-supervisor'
+        ];
+
+        // Also check if they come in with spaces instead of hyphens just to be safe
+        const normalizedRole = roleStrLower.replace(/\s+/g, '-');
+          
+        if (!allowedRoles.includes(normalizedRole)) {
+          Toast.show('Access Denied: Mobile app is restricted to authorized roles only.', Toast.LONG);
+          return;
+        }
+
+        // Robust logic to group Supervisor and Manager roles (Removed Body Shop)
+        if (
+          roleStr.includes('FLOOR') || roleStr.includes('SUPERVISOR') || roleStr.includes('MANAGER') ||
+          userStr.includes('SUPERVISOR') || userStr.includes('MANAGER') || userStr.includes('FLOOR') ||
+          emailStr.includes('SUPERVISOR') || emailStr.includes('MANAGER') || emailStr.includes('FLOOR')
+        ) {
           appModule = 'FLOOR_SUPERVISOR';
         }
 
@@ -155,6 +158,7 @@ export function LoginScreen({ navigation }) {
       Toast.show(errorMessage, Toast.SHORT);
     }
   };
+
 
   const handleForgotPassword = async () => {
     const emailRegex = /^(?=[^@]*[a-zA-Z])[^\s@]+@[^\s@]+\.[^\s@]+$/;

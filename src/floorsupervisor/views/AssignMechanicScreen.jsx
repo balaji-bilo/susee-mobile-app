@@ -8,9 +8,11 @@ import {
   TextInput,
   StatusBar,
   SafeAreaView,
-  Platform,
   Modal,
   Pressable,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import {
   Search,
@@ -28,6 +30,10 @@ import { colors, fonts } from '../../common/config/theme';
 import { AssignTechnicianModal } from '../components/AssignTechnicianModal';
 import { FloorSupervisorHeader } from '../components/FloorSupervisorHeader';
 import Toast from 'react-native-simple-toast';
+import axios from 'axios';
+import { base_url, mobile_assign_mechanic_list } from '../../common/config/constant';
+import { retrieveEncryptedData } from '../../common/config/storage';
+import { useFocusEffect } from '@react-navigation/native';
 
 function formatVehicleNumber(num) {
   if (!num) return '';
@@ -39,7 +45,46 @@ function formatVehicleNumber(num) {
   return clean;
 }
 
+function formatWaitTime(waitTimeStr) {
+  if (!waitTimeStr) return '';
+  const minsMatch = waitTimeStr.toString().trim().match(/^(\d+)\s*mins?$/i);
+  if (minsMatch) {
+    const totalMins = parseInt(minsMatch[1], 10);
+    if (totalMins < 60) return `${totalMins} mins`;
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    return mins > 0 ? `${hours} hr ${mins} mins` : `${hours} hr`;
+  }
+  return waitTimeStr;
+}
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const CardSkeleton = () => {
+  return (
+    <View style={[styles.card, { padding: 0, marginBottom: 16 }]}>
+      <View style={[styles.cardHeaderRow, { backgroundColor: '#F8FAFC', padding: 12, borderTopLeftRadius: 12, borderTopRightRadius: 12 }]}>
+        <View style={{ width: 100, height: 24, backgroundColor: '#E2E8F0', borderRadius: 4 }} />
+        <View style={{ width: 70, height: 20, backgroundColor: '#E2E8F0', borderRadius: 10 }} />
+      </View>
+      <View style={{ padding: 16 }}>
+        <View style={styles.customerRow}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#F1F5F9' }} />
+            <View style={{ width: 80, height: 20, backgroundColor: '#F1F5F9', borderRadius: 4, marginLeft: 8 }} />
+          </View>
+          <View style={{ width: 60, height: 30, backgroundColor: '#F1F5F9', borderRadius: 16 }} />
+        </View>
+        <View style={{ width: '100%', height: 40, backgroundColor: '#F8FAFC', borderRadius: 4, marginTop: 12 }} />
+        <View style={{ width: '80%', height: 20, backgroundColor: '#FEF3C7', borderRadius: 4, marginTop: 12 }} />
+        <View style={[styles.actionRow, { marginTop: 16 }]}>
+          <View style={{ width: '30%', height: 36, backgroundColor: '#F1F5F9', borderRadius: 4 }} />
+          <View style={{ width: '60%', height: 36, backgroundColor: '#E2E8F0', borderRadius: 4 }} />
+        </View>
+      </View>
+    </View>
+  );
+};
 
 export function AssignMechanicScreen() {
   const insets = useSafeAreaInsets();
@@ -48,74 +93,109 @@ export function AssignMechanicScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [skipModalVisible, setSkipModalVisible] = useState(false);
   const [selectedJobCardToSkip, setSelectedJobCardToSkip] = useState(null);
-  const [activeTab, setActiveTab] = useState('MECHANICAL'); // 'ALL' | 'MECHANICAL' | 'BODY_SHOP'
+  const [skipReason, setSkipReason] = useState('');
+  const [isSkipping, setIsSkipping] = useState(false);
+  const [activeTab, setActiveTab] = useState('MECHANICAL');
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [tabCounts, setTabCounts] = useState({ MECHANICAL: 0, BODY_SHOP: 0 });
+  const [refreshing, setRefreshing] = useState(false);
 
   // Tab definitions
   const tabs = [
-    { key: 'MECHANICAL', label: 'Mechanical', dept: 'Mechanical' },
-    { key: 'BODY_SHOP', label: 'Body Shop', dept: 'Body Shop' },
+    { key: 'MECHANICAL', label: 'Mechanical', dept: 'mechanical' },
+    { key: 'BODY_SHOP', label: 'Body Shop', dept: 'body-shop' },
   ];
 
-  // Initial pending allocation items with Department tags
-  const [allocations, setAllocations] = useState([
-    {
-      id: '1',
-      jobCard: 'JC-0043',
-      vehicleNo: 'TN00HJ6789',
-      customer: 'Kings',
-      initial: 'K',
-      services: 'Engine Inspection & Oil Filter Change',
-      waitTime: '12 mins',
-      delivery: '25 Sep 2026, 11:24 AM',
-      department: 'Mechanical',
-    },
-    {
-      id: '2',
-      jobCard: 'JC-0042',
-      vehicleNo: 'TN80CG4456',
-      customer: 'Joyo',
-      initial: 'J',
-      services: 'Brake Pad & Suspension Check',
-      waitTime: '50 mins',
-      delivery: '25 Sep 2026, 11:08 AM',
-      department: 'Mechanical',
-    },
-    {
-      id: '3',
-      jobCard: 'JC-0044',
-      vehicleNo: 'TN89KL7890',
-      customer: 'Kilso',
-      initial: 'K',
-      services: 'Door Dent Repair & Full Painting',
-      waitTime: '4 mins',
-      delivery: '25 Sep 2026, 11:33 AM',
-      department: 'Body Shop',
-    },
-    {
-      id: '4',
-      jobCard: 'JC-0045',
-      vehicleNo: 'TN90AD6789',
-      customer: 'Jiya',
-      initial: 'J',
-      services: 'Bumper Scratch Polish & Denting',
-      waitTime: '25 mins',
-      delivery: '25 Sep 2026, 02:15 PM',
-      department: 'Body Shop',
-    },
-  ]);
+  const fetchRequests = async (pageNum, isRefresh = false) => {
+    try {
+      if (pageNum === 1 && !refreshing) setLoading(true);
+      else if (!refreshing) setLoadingMore(true);
 
-  const filteredAllocations = allocations.filter((item) => {
-    const matchesSearch =
-      item.jobCard.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.vehicleNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.customer.toLowerCase().includes(searchQuery.toLowerCase());
+      const token = await retrieveEncryptedData('token');
+      const dept = activeTab === 'BODY_SHOP' ? 'body-shop' : 'mechanical';
+      
+      const response = await axios.get(`${base_url}${mobile_assign_mechanic_list}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          page: pageNum,
+          limit: 10,
+          search: searchQuery,
+          department: dept
+        }
+      });
 
-    const matchesTab =
-      (activeTab === 'MECHANICAL' && item.department === 'Mechanical') ||
-      (activeTab === 'BODY_SHOP' && item.department === 'Body Shop');
+      if (response.data.success) {
+        const { requests: newRequests, counts } = response.data.data;
+        
+        setTabCounts({
+          MECHANICAL: counts.mechanical || 0,
+          BODY_SHOP: counts.bodyShop || 0
+        });
 
-    return matchesSearch && matchesTab;
-  });
+        if (isRefresh || pageNum === 1) {
+          setRequests(newRequests);
+        } else {
+          setRequests(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newItems = newRequests.filter(f => !existingIds.has(f.id));
+            return [...prev, ...newItems];
+          });
+        }
+
+        if (newRequests.length < 10) {
+          setHasMore(false);
+        } else {
+          setHasMore(true);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching assign mechanic list:', error);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setPage(1);
+    fetchRequests(1, true);
+  };
+
+  React.useEffect(() => {
+    setPage(1);
+    fetchRequests(1, true);
+  }, [activeTab]);
+
+  React.useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      setPage(1);
+      fetchRequests(1, true);
+    }, 400);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
+
+  const handleLoadMore = () => {
+    if (!loading && !loadingMore && hasMore) {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      fetchRequests(nextPage);
+    }
+  };
+
+  const renderFooter = () => {
+    if (!loadingMore) return null;
+    return (
+      <View style={{ paddingVertical: 20 }}>
+        <ActivityIndicator size="small" color={colors.primary} />
+      </View>
+    );
+  };
 
   const handleOpenAssign = (item) => {
     setSelectedJobCard(item);
@@ -124,53 +204,62 @@ export function AssignMechanicScreen() {
 
   const handleOpenSkipModal = (item) => {
     setSelectedJobCardToSkip(item);
+    setSkipReason('');
     setSkipModalVisible(true);
   };
 
   const handleCancelSkip = () => {
     setSkipModalVisible(false);
     setSelectedJobCardToSkip(null);
+    setSkipReason('');
   };
 
-  const handleConfirmSkipDept = () => {
+  const handleConfirmSkipDept = async () => {
     if (!selectedJobCardToSkip) return;
-    const jobCardNo = selectedJobCardToSkip.jobCard;
+    if (!skipReason || !skipReason.trim()) {
+      Toast.show('Reason is required to skip the department', Toast.SHORT);
+      return;
+    }
+    
+    const jobCardId = selectedJobCardToSkip.id;
+    const department = activeTab === 'BODY_SHOP' ? 'body-shop' : 'mechanical';
 
-    setAllocations((prev) => {
-      const target = prev.find((item) => item.jobCard === jobCardNo);
-      if (!target) return prev;
-
-      if (target.department === 'Mechanical') {
-        Toast.show(
-          `Skipped Mechanical for #${jobCardNo} ➔ Moved to Body Shop!`,
-          Toast.LONG
-        );
-        return prev.map((item) =>
-          item.jobCard === jobCardNo
-            ? { ...item, department: 'Body Shop' }
-            : item
-        );
-      } else {
-        Toast.show(
-          `Skipped Body Shop department for #${jobCardNo}`,
-          Toast.SHORT
-        );
-        return prev.filter((item) => item.jobCard !== jobCardNo);
+    try {
+      setIsSkipping(true);
+      const token = await retrieveEncryptedData('token');
+      const response = await axios.post(
+        `${base_url}/job-cards/${jobCardId}/departments/${department}/skip`,
+        { reason: skipReason },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.data.success) {
+        Toast.show('Department skipped successfully', Toast.SHORT);
+        setSkipModalVisible(false);
+        setSelectedJobCardToSkip(null);
+        setSkipReason('');
+        
+        // Refresh the list after skipping
+        setPage(1);
+        fetchRequests(1, true);
       }
-    });
-
-    setSkipModalVisible(false);
-    setSelectedJobCardToSkip(null);
+    } catch (error) {
+      Toast.show(error?.response?.data?.message || error?.message || 'Failed to skip department', Toast.LONG);
+    } finally {
+      setIsSkipping(false);
+    }
   };
 
   const handleAssignSuccess = (data) => {
     Toast.show(
-      `Assigned ${data.technician} (${data.bay}) to ${data.jobCardNumber}!`,
+      `Assigned ${data.technician} (${data.bay}) to #${data.jobCardNumber}!`,
       Toast.LONG
     );
-    setAllocations((prev) =>
-      prev.filter((item) => item.jobCard !== data.jobCardNumber)
+    setRequests((prev) =>
+      prev.filter((item) => item.id !== data.jobCardId)
     );
+    // Refresh count on assignment
+    fetchRequests(1, true);
   };
 
   return (
@@ -205,10 +294,7 @@ export function AssignMechanicScreen() {
           >
             {tabs.map((tab) => {
               const isActive = activeTab === tab.key;
-              const count =
-                tab.key === 'ALL'
-                  ? allocations.length
-                  : allocations.filter((a) => a.department === tab.dept).length;
+              const count = tabCounts[tab.key] || 0;
 
               return (
                 <TouchableOpacity
@@ -248,20 +334,38 @@ export function AssignMechanicScreen() {
         </View>
 
         {/* Compact Card List Scroll View */}
-        <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
-          showsVerticalScrollIndicator={false}
-        >
-          {filteredAllocations.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>No Allocations Pending</Text>
-              <Text style={styles.emptySubtitle}>
-                No vehicle mechanic assignments pending in this tab.
-              </Text>
-            </View>
-          ) : (
-            filteredAllocations.map((item) => (
-              <View key={item.id} style={styles.card}>
+        {loading && page === 1 ? (
+          <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]} showsVerticalScrollIndicator={false}>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </ScrollView>
+        ) : (
+          <FlatList
+            data={requests}
+            keyExtractor={(item, index) => item.id + '_' + index.toString()}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
+            showsVerticalScrollIndicator={false}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={renderFooter}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[colors.primary]}
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyTitle}>No Allocations Pending</Text>
+                <Text style={styles.emptySubtitle}>
+                  No vehicle mechanic assignments pending in this tab.
+                </Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <View style={styles.card}>
                 {/* Header Row: IND License Plate & Job Card + Dept Badge */}
                 <View style={styles.cardHeaderRow}>
                   {/* Styled IND License Plate */}
@@ -282,12 +386,12 @@ export function AssignMechanicScreen() {
                     <View
                       style={[
                         styles.deptBadge,
-                        item.department === 'Mechanical'
+                        item.departmentTag === 'Mechanical'
                           ? styles.deptBadgeMech
                           : styles.deptBadgeBody,
                       ]}
                     >
-                      {item.department === 'Mechanical' ? (
+                      {item.departmentTag === 'Mechanical' ? (
                         <Wrench size={10} color="#1E40AF" style={{ marginRight: 3 }} />
                       ) : (
                         <Shield size={10} color="#6B21A8" style={{ marginRight: 3 }} />
@@ -295,19 +399,19 @@ export function AssignMechanicScreen() {
                       <Text
                         style={[
                           styles.deptBadgeText,
-                          item.department === 'Mechanical'
+                          item.departmentTag === 'Mechanical'
                             ? styles.deptTextMech
                             : styles.deptTextBody,
                         ]}
                       >
-                        {item.department}
+                        {item.departmentTag}
                       </Text>
                     </View>
 
                     {/* Job Card Badge */}
                     <View style={styles.jobCardBadge}>
                       <View style={styles.jobBadgeDot} />
-                      <Text style={styles.jobBadgeText}>#{item.jobCard}</Text>
+                      <Text style={styles.jobBadgeText}>#{item.jobCardNo}</Text>
                     </View>
                   </View>
                 </View>
@@ -319,11 +423,11 @@ export function AssignMechanicScreen() {
                   {/* Left: Avatar & Name */}
                   <View style={styles.customerLeftGroup}>
                     <View style={styles.avatarCircle}>
-                      <Text style={styles.avatarInitial}>{item.initial}</Text>
+                      <Text style={styles.avatarInitial}>{item.customerInitial}</Text>
                     </View>
                     <View style={styles.customerTextCol}>
                       <Text style={styles.customerLabel}>CUSTOMER</Text>
-                      <Text style={styles.customerName}>{item.customer}</Text>
+                      <Text style={styles.customerName}>{item.customerName}</Text>
                     </View>
                   </View>
 
@@ -332,7 +436,7 @@ export function AssignMechanicScreen() {
                     <Clock size={14} color="#D97706" style={{ marginTop: 1 }} />
                     <View style={styles.waitTimeCol}>
                       <Text style={styles.waitTimeLabel}>WAIT TIME</Text>
-                      <Text style={styles.waitTimeVal}>{item.waitTime}</Text>
+                      <Text style={styles.waitTimeVal}>{formatWaitTime(item.waitTime)}</Text>
                     </View>
                   </View>
                 </View>
@@ -342,7 +446,7 @@ export function AssignMechanicScreen() {
                   <Text style={styles.servicesLabel}>SERVICES REQUIRED</Text>
                   <View style={styles.servicePill}>
                     <View style={styles.serviceAccentBar} />
-                    <Text style={styles.servicePillText}>{item.services}</Text>
+                    <Text style={styles.servicePillText}>{item.servicesRequired}</Text>
                   </View>
                 </View>
 
@@ -351,7 +455,7 @@ export function AssignMechanicScreen() {
                   <AlertTriangle size={14} color="#D97706" />
                   <Text style={styles.deliveryText}>
                     <Text style={styles.deliveryLabel}>Delivery: </Text>
-                    {item.delivery}
+                    {item.deliveryDate}
                   </Text>
                 </View>
 
@@ -359,34 +463,40 @@ export function AssignMechanicScreen() {
 
                 {/* Action Buttons */}
                 <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={styles.skipBtn}
-                    activeOpacity={0.8}
-                    onPress={() => handleOpenSkipModal(item)}
-                  >
-                    <Text style={styles.skipBtnText}>Skip Dept</Text>
-                  </TouchableOpacity>
+                  {item.canSkip && (
+                    <TouchableOpacity
+                      style={styles.skipBtn}
+                      activeOpacity={0.8}
+                      onPress={() => handleOpenSkipModal(item)}
+                    >
+                      <Text style={styles.skipBtnText}>Skip Dept</Text>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity
-                    style={styles.assignBtn}
+                    style={[styles.assignBtn, !item.canSkip && { flex: 1 }]}
                     activeOpacity={0.88}
                     onPress={() => handleOpenAssign(item)}
                   >
-                    <Text style={styles.assignBtnText}>Assign Mechanic</Text>
+                    <Text style={styles.assignBtnText}>
+                      {activeTab === 'BODY_SHOP' ? 'Assign Technician' : 'Assign Mechanic'}
+                    </Text>
                     <ChevronRight size={15} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
               </View>
-            ))
-          )}
-        </ScrollView>
+            )}
+          />
+        )}
       </View>
 
       {/* Assignment Modal */}
       <AssignTechnicianModal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        jobCardNumber={selectedJobCard?.jobCard}
+        jobCardNumber={selectedJobCard?.jobCardNo}
+        jobCardId={selectedJobCard?.id}
+        department={activeTab === 'BODY_SHOP' ? 'body-shop' : 'mechanical'}
         onAssignSuccess={handleAssignSuccess}
       />
 
@@ -398,44 +508,51 @@ export function AssignMechanicScreen() {
         onRequestClose={handleCancelSkip}
       >
         <Pressable style={styles.skipModalOverlay} onPress={handleCancelSkip}>
-          <Pressable style={styles.skipModalCard} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.skipModalIconCircle}>
-              <AlertTriangle size={24} color="#D97706" />
-            </View>
-
-            <Text style={styles.skipModalTitle}>Skip Department?</Text>
-
-            <Text style={styles.skipModalMessage}>
-              Are you sure you want to skip{' '}
-              <Text style={{ fontFamily: fonts.interBold, color: '#0F172A' }}>
-                {selectedJobCardToSkip?.department || 'Mechanical'}
-              </Text>{' '}
-              department and move Job Card{' '}
-              <Text style={{ fontFamily: fonts.interBold, color: colors.primary }}>
-                #{selectedJobCardToSkip?.jobCard}
-              </Text>{' '}
-              to{' '}
-              <Text style={{ fontFamily: fonts.interBold, color: '#0D9488' }}>
-                Body Shop
-              </Text>
-              ?
+          <Pressable style={[styles.skipModalCard, { alignItems: 'stretch' }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={[styles.skipModalTitle, { textAlign: 'left', marginBottom: 16 }]}>
+              Skip {selectedJobCardToSkip?.department || 'Mechanical'} Department
             </Text>
 
-            <View style={styles.skipModalActionRow}>
+            <Text style={[styles.skipModalMessage, { textAlign: 'left', marginBottom: 16 }]}>
+              Skipping this department will postpone all remaining services for this job card in this queue and route it to the next department.
+            </Text>
+
+            <View style={styles.reasonInputContainer}>
+              <TextInput
+                style={styles.reasonInput}
+                placeholder="Reason for skipping *"
+                placeholderTextColor="#94A3B8"
+                value={skipReason}
+                onChangeText={setSkipReason}
+                multiline
+                textAlignVertical="top"
+              />
+            </View>
+
+            <View style={[styles.skipModalActionRow, { justifyContent: 'flex-end', marginTop: 16 }]}>
               <TouchableOpacity
-                style={styles.skipCancelBtn}
+                style={[styles.skipCancelBtn, { flex: 0, paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderColor: '#E2E8F0' }]}
                 activeOpacity={0.7}
                 onPress={handleCancelSkip}
               >
-                <Text style={styles.skipCancelBtnText}>No</Text>
+                <Text style={[styles.skipCancelBtnText, { color: '#64748B' }]}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.skipConfirmBtn}
+                style={[
+                  styles.skipConfirmBtn,
+                  { flex: 0, paddingHorizontal: 20, backgroundColor: colors.primary },
+                  (!skipReason.trim() || isSkipping) && { opacity: 0.5 }
+                ]}
                 activeOpacity={0.85}
                 onPress={handleConfirmSkipDept}
+                disabled={!skipReason.trim() || isSkipping}
               >
-                <Text style={styles.skipConfirmBtnText}>Yes, Skip</Text>
+                {isSkipping ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.skipConfirmBtnText}>Confirm Skip</Text>
+                )}
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -989,6 +1106,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 20,
+  },
+  reasonInputContainer: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 8,
+  },
+  reasonInput: {
+    height: 100,
+    padding: 12,
+    fontSize: 14,
+    fontFamily: fonts.inter,
+    color: '#0F172A',
   },
   skipModalActionRow: {
     flexDirection: 'row',

@@ -417,7 +417,7 @@ export function RecordDetailScreen({ route, navigation }) {
                     {item.quantity || 1}
                   </Text>
                   <Text style={[styles.columnValue, { flex: 1.5, textAlign: 'right', fontFamily: fonts.inter }]}>
-                    ₹{(item.price || item.unitPrice || 0) * (item.quantity || 1)}
+                    <Text style={{ fontFamily: fonts.inter }}>₹</Text>{(item.price || item.unitPrice || 0) * (item.quantity || 1)}
                   </Text>
                 </View>
               ))}
@@ -428,22 +428,22 @@ export function RecordDetailScreen({ route, navigation }) {
           <View style={styles.calculationSection}>
             <View style={styles.calcRow}>
               <Text style={styles.calcLabel}>Service Subtotal</Text>
-              <Text style={styles.calcValue}>₹{subtotal}</Text>
+              <Text style={styles.calcValue}><Text style={{ fontFamily: fonts.inter }}>₹</Text>{subtotal}</Text>
             </View>
             {discount > 0 && (
               <View style={styles.calcRow}>
                 <Text style={styles.calcLabel}>Discount</Text>
-                <Text style={[styles.calcValue, { color: colors.danger }]}>-₹{discount}</Text>
+                <Text style={[styles.calcValue, { color: colors.danger }]}>-<Text style={{ fontFamily: fonts.inter }}>₹</Text>{discount}</Text>
               </View>
             )}
             <View style={styles.calcRow}>
               <Text style={styles.calcLabel}>Estimated GST ({displayTaxRate}%)</Text>
-              <Text style={styles.calcValue}>₹{tax}</Text>
+              <Text style={styles.calcValue}><Text style={{ fontFamily: fonts.inter }}>₹</Text>{tax}</Text>
             </View>
 
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Grand Total Estimate</Text>
-              <Text style={styles.totalValue}>₹{totalAmount}</Text>
+              <Text style={styles.totalValue}><Text style={{ fontFamily: fonts.inter }}>₹</Text>{totalAmount}</Text>
             </View>
           </View>
         </View>
