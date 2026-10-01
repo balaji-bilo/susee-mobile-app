@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -50,6 +50,8 @@ function formatVehicleNumber(num) {
 
 export function FloorJobCardsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const tabsScrollViewRef = useRef(null);
+  const flatListRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('ALL');
   const [assignModalVisible, setAssignModalVisible] = useState(false);
@@ -272,7 +274,15 @@ export function FloorJobCardsScreen({ navigation }) {
   };
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
+      setSelectedStatusFilter('ALL');
+      setSearchQuery('');
+      if (tabsScrollViewRef.current) {
+        tabsScrollViewRef.current.scrollTo({ x: 0, y: 0, animated: false });
+      }
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({ offset: 0, animated: false });
+      }
       fetchJobCards();
     }, [])
   );
@@ -390,6 +400,12 @@ export function FloorJobCardsScreen({ navigation }) {
   };
 
   const handleOpenAssignModal = (card) => {
+    const isReady =
+      selectedStatusFilter === 'READY_FOR_DELIVERY' ||
+      String(card?.status || '').toUpperCase().includes('READY') ||
+      String(card?.status || '').toUpperCase().includes('DELIVER');
+    if (isReady) return;
+
     setSelectedCardForAssign(card);
     setAssignModalVisible(true);
   };
@@ -438,6 +454,7 @@ export function FloorJobCardsScreen({ navigation }) {
         {/* Horizontal Filter Pill Tabs with Badges */}
         <View style={styles.tabsContainer}>
           <ScrollView
+            ref={tabsScrollViewRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.tabsScrollContent}
@@ -458,26 +475,26 @@ export function FloorJobCardsScreen({ navigation }) {
                   </Text>
                   <View
                     style={[
-                      styles.tabBadge,
-                      isActive ? styles.tabBadgeActive : styles.tabBadgeInactive,
+                    styles.tabBadge,
+                    isActive ? styles.tabBadgeActive : styles.tabBadgeInactive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.tabBadgeText,
+                      isActive
+                        ? styles.tabBadgeTextActive
+                        : styles.tabBadgeTextInactive,
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.tabBadgeText,
-                        isActive
-                          ? styles.tabBadgeTextActive
-                          : styles.tabBadgeTextInactive,
-                      ]}
-                    >
-                      {count}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
+                    {count}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
         {/* Job Cards List */}
         {isLoading ? (
@@ -492,6 +509,7 @@ export function FloorJobCardsScreen({ navigation }) {
           </View>
         ) : (
           <FlatList
+            ref={flatListRef}
             data={filteredCards.slice(0, visibleCount)}
             keyExtractor={(item) => item.id}
             contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
@@ -524,6 +542,11 @@ export function FloorJobCardsScreen({ navigation }) {
                 displayMechanic = bodyInfo.mechanic || 'Unassigned';
                 displayBay = bodyInfo.bay || 'Unassigned';
               }
+
+              const isReadyForDelivery =
+                selectedStatusFilter === 'READY_FOR_DELIVERY' ||
+                String(item.status || '').toUpperCase().includes('READY') ||
+                String(item.status || '').toUpperCase().includes('DELIVER');
 
               return (
                 <TouchableOpacity
@@ -602,14 +625,15 @@ export function FloorJobCardsScreen({ navigation }) {
                     </View>
                   </View>
 
-                  {/* Mechanic & Bay Badges (Click to open assign modal) */}
+                  {/* Mechanic & Bay Badges (Disabled / non-interactive when Ready for Delivery) */}
                   <View style={styles.assignmentRow}>
                     <View style={styles.tagCol}>
                       <Text style={styles.detailLabel}>MECHANIC</Text>
                       <TouchableOpacity
                         style={[styles.tagBadge, displayMechanic !== 'Unassigned' && styles.tagBadgeActive]}
-                        activeOpacity={0.7}
-                        onPress={() => handleOpenAssignModal(item)}
+                        activeOpacity={isReadyForDelivery ? 1 : 0.7}
+                        disabled={isReadyForDelivery}
+                        onPress={() => !isReadyForDelivery && handleOpenAssignModal(item)}
                       >
                         <Wrench size={11} color={displayMechanic !== 'Unassigned' ? colors.primary : '#94A3B8'} />
                         <Text style={[styles.tagText, displayMechanic !== 'Unassigned' && styles.tagTextActive]}>
@@ -622,8 +646,9 @@ export function FloorJobCardsScreen({ navigation }) {
                       <Text style={styles.detailLabel}>BAY</Text>
                       <TouchableOpacity
                         style={[styles.tagBadge, displayBay !== 'Unassigned' && styles.tagBadgeActiveGreen]}
-                        activeOpacity={0.7}
-                        onPress={() => handleOpenAssignModal(item)}
+                        activeOpacity={isReadyForDelivery ? 1 : 0.7}
+                        disabled={isReadyForDelivery}
+                        onPress={() => !isReadyForDelivery && handleOpenAssignModal(item)}
                       >
                         <Layers size={11} color={displayBay !== 'Unassigned' ? '#059669' : '#94A3B8'} />
                         <Text style={[styles.tagText, displayBay !== 'Unassigned' && styles.tagTextGreen]}>
@@ -1053,7 +1078,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 80,
+    paddingBottom: 70,
   },
   loadingText: {
     fontSize: 14,

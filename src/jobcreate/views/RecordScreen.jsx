@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, ScrollView, TextInput, TouchableOpacity, RefreshControl, Modal } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, FlatList, ScrollView, TextInput, TouchableOpacity, RefreshControl, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fonts, spacing } from '../../common/config/theme';
 import styles from '../styles/recordStyles';
@@ -10,6 +10,7 @@ import { retrieveEncryptedData, getInitials } from '../../common/config/storage'
 import axios from 'axios';
 import { RecordSkeleton } from '../components/loading/RecordSkeleton';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useFocusEffect } from '@react-navigation/native';
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '';
@@ -34,6 +35,16 @@ export function RecordScreen({ createdJobCards, navigation }) {
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [brands, setBrands] = useState([]);
   const [activeTab, setActiveTab] = useState('In Progress');
+  const [visibleCount, setVisibleCount] = useState(5);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      setActiveTab('In Progress');
+      setSearchQuery('');
+      setVisibleCount(5);
+    }, [])
+  );
 
   useEffect(() => {
     const fetchBrands = async () => {
@@ -145,8 +156,13 @@ export function RecordScreen({ createdJobCards, navigation }) {
 
   const onRefresh = () => {
     setRefreshing(true);
+    setVisibleCount(5);
     fetchQueue(false);
   };
+
+  useEffect(() => {
+    setVisibleCount(5);
+  }, [activeTab, searchQuery, fromDate, toDate]);
 
   const onFromDateChange = (event, selectedDate) => {
     setShowFromPicker(false);
@@ -216,6 +232,18 @@ export function RecordScreen({ createdJobCards, navigation }) {
 
     return matchesQuery && matchesDate;
   });
+
+  const displayedCards = filteredCards.slice(0, visibleCount);
+
+  const handleLoadMore = () => {
+    if (visibleCount < filteredCards.length && !isLoadingMore) {
+      setIsLoadingMore(true);
+      setTimeout(() => {
+        setVisibleCount((prev) => prev + 5);
+        setIsLoadingMore(false);
+      }, 500);
+    }
+  };
 
   const renderItem = ({ item }) => {
     const recordData = getRecordData(item);
@@ -407,14 +435,26 @@ export function RecordScreen({ createdJobCards, navigation }) {
           <RecordSkeleton />
         ) : (
           <FlatList
-            data={filteredCards}
+            data={displayedCards}
             keyExtractor={(item) => {
               const recordData = getRecordData(item);
               return recordData?.id ? String(recordData.id) : String(Math.random());
             }}
             renderItem={renderItem}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={filteredCards.length === 0 ? { flexGrow: 1, paddingBottom: 120 } : { paddingBottom: 120 }}
+            contentContainerStyle={displayedCards.length === 0 ? { flexGrow: 1, paddingBottom: 120 } : { paddingBottom: 120 }}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.2}
+            ListFooterComponent={() =>
+              isLoadingMore ? (
+                <View style={{ paddingVertical: 18, alignItems: 'center', justifyContent: 'center' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={{ marginTop: 6, fontSize: 12, fontFamily: fonts.inter, color: '#64748B' }}>
+                    Loading more records...
+                  </Text>
+                </View>
+              ) : null
+            }
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />
             }

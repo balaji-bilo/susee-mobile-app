@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar, TextInput,
-  KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal
+  KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator, Modal, Keyboard,
+  TouchableWithoutFeedback
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
@@ -35,6 +36,7 @@ function formatApiTime(isoString) {
 export default function HomeScreen({ navigation }) {
   const [now, setNow] = useState(new Date());
   const isFocused = useIsFocused();
+  const scrollViewRef = useRef(null);
 
   const [currentName, setCurrentName] = useState('');
   const initials = getInitials(currentName);
@@ -56,6 +58,38 @@ export default function HomeScreen({ navigation }) {
   const [whatsappNumberError, setWhatsappNumberError] = useState('');
 
   const [refreshing, setRefreshing] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSubscription = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  const handleInputFocus = () => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 150);
+  };
+
+  useEffect(() => {
+    if (formVisible) {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 200);
+    }
+  }, [formVisible]);
 
   const loadData = async () => {
     try {
@@ -281,9 +315,20 @@ export default function HomeScreen({ navigation }) {
         style={{ flex: 1 }}
       >
         <ScrollView
-          contentContainerStyle={s.scroll}
+          ref={scrollViewRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={[
+            s.scroll,
+            {
+              flexGrow: 1,
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 140,
+            },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          onScrollBeginDrag={Keyboard.dismiss}
+          nestedScrollEnabled={true}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -411,6 +456,7 @@ export default function HomeScreen({ navigation }) {
                         setWhatsappNumber(text);
                         setWhatsappNumberError('');
                       }}
+                      onFocus={handleInputFocus}
                       placeholder="Enter WhatsApp number"
                       placeholderTextColor={COLORS.muted}
                       keyboardType="phone-pad"
@@ -443,6 +489,7 @@ export default function HomeScreen({ navigation }) {
                       style={s.textInputStyle}
                       value={remarks}
                       onChangeText={setRemarks}
+                      onFocus={handleInputFocus}
                       placeholder="Any specific comments"
                       placeholderTextColor={COLORS.muted}
                     />

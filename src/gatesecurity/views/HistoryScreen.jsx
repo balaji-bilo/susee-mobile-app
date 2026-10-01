@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, FlatList, TouchableOpacity, TextInput, ActivityIndicator, StatusBar, Platform, UIManager, RefreshControl, Modal, TouchableWithoutFeedback } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import {
   Calendar as CalendarIcon,
   X,
@@ -255,6 +255,13 @@ export default function HistoryScreen({ navigation }) {
       setRefreshing(false);
     }
   }, [debouncedSearchQuery, fromDate, toDate, entryTypeFilter, activeTab]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setActiveTab('All');
+      setSearchQuery('');
+    }, [])
+  );
 
   useEffect(() => {
     if (isFocused) {

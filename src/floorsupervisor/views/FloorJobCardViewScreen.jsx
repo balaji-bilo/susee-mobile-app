@@ -481,6 +481,11 @@ export function FloorJobCardViewScreen({ route, navigation }) {
   const safeTop = insets.top > 0 ? insets.top : (Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0);
   const topPadding = safeTop + 6;
 
+  const isReadyForDelivery =
+    route?.params?.activeTab === 'READY_FOR_DELIVERY' ||
+    String(card.status || '').toUpperCase().includes('READY') ||
+    String(card.status || '').toUpperCase().includes('DELIVER');
+
   return (
     <View style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
@@ -636,28 +641,30 @@ export function FloorJobCardViewScreen({ route, navigation }) {
               <FileText size={16} color={colors.primary} style={{ marginRight: 6 }} />
               <Text style={styles.sectionTitle}>Selected Services</Text>
             </View>
-            <TouchableOpacity
-              style={styles.editSectionBtn}
-              activeOpacity={0.7}
-              onPress={() =>
-                navigation?.navigate('EditSelectedServicesScreen', {
-                  card: { ...card, selectedServices: services },
-                  onSaveServices: (newServices) => {
-                    setServicesList(newServices);
-                    setAdditionalWorkList(prevAddl =>
-                      prevAddl.map(item => {
-                        const match = newServices.find(s => s.id === item.id);
-                        return match ? { ...item, status: match.status } : item;
-                      })
-                    );
-                    fetchJobCardDetail();
-                  },
-                })
-              }
-            >
-              <Pencil size={12} color={colors.primary} style={{ marginRight: 4 }} />
-              <Text style={styles.editSectionBtnText}>Edit Status</Text>
-            </TouchableOpacity>
+            {!isReadyForDelivery && (
+              <TouchableOpacity
+                style={styles.editSectionBtn}
+                activeOpacity={0.7}
+                onPress={() =>
+                  navigation?.navigate('EditSelectedServicesScreen', {
+                    card: { ...card, selectedServices: services },
+                    onSaveServices: (newServices) => {
+                      setServicesList(newServices);
+                      setAdditionalWorkList(prevAddl =>
+                        prevAddl.map(item => {
+                          const match = newServices.find(s => s.id === item.id);
+                          return match ? { ...item, status: match.status } : item;
+                        })
+                      );
+                      fetchJobCardDetail();
+                    },
+                  })
+                }
+              >
+                <Pencil size={12} color={colors.primary} style={{ marginRight: 4 }} />
+                <Text style={styles.editSectionBtnText}>Edit Status</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Table Header */}
@@ -716,88 +723,92 @@ export function FloorJobCardViewScreen({ route, navigation }) {
           })}
         </View>
 
-        {/* 3. Additional Work & Services */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderBetween}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <PlusCircle size={16} color="#059669" style={{ marginRight: 6 }} />
-              <Text style={styles.sectionTitle}>Additional Work & Services</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.editSectionBtn}
-              activeOpacity={0.7}
-              onPress={() =>
-                navigation?.navigate('AddAdditionalWorkScreen', {
-                  card: { ...card, currentServices: services },
-                  department: route?.params?.department || null,
-                  activeTab: route?.params?.activeTab || null,
-                  onSaveAdditionalWork: (newItems) => {
-                    setAdditionalWorkList(prev => [...prev, ...newItems]);
-                    setServicesList(prev => {
-                      const existingIds = new Set(prev.map(p => p.id));
-                      const toAdd = newItems.filter(item => !existingIds.has(item.id)).map(item => ({
-                        ...item,
-                        qty: item.qty || 'x1',
-                      }));
-                      return [...prev, ...toAdd];
-                    });
-                    fetchJobCardDetail();
-                  },
-                })
-              }
-            >
-              <Pencil size={12} color="#059669" style={{ marginRight: 4 }} />
-              <Text style={[styles.editSectionBtnText, { color: '#059669' }]}>Edit / Add</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Table Header */}
-          <View style={styles.tableHeader}>
-            <Text style={[styles.tableHeadText, { flex: 2.5 }]}>Service Description</Text>
-            <Text style={[styles.tableHeadText, { flex: 1.5, textAlign: 'center' }]}>Status</Text>
-            <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'right' }]}>Rate</Text>
-          </View>
-
-          {additionalWork.map((item, idx) => {
-            const stBadge = getStatusBadgeConfig(item.status);
-            return (
-              <View
-                key={item.id || idx}
-                style={[
-                  styles.tableRow,
-                  idx === additionalWork.length - 1 && { borderBottomWidth: 0 },
-                ]}
-              >
-                <Text style={[styles.tableCellText, { flex: 2.5 }]}>{item.name}</Text>
-                <View style={{ flex: 1.5, alignItems: 'center' }}>
-                  <View
-                    style={[
-                      styles.statusPillSmall,
-                      {
-                        backgroundColor: stBadge.bg,
-                        borderColor: stBadge.border,
-                        borderWidth: 1,
+        {/* 3. Additional Work & Services (Only displayed when additional work exists) */}
+        {additionalWork && additionalWork.length > 0 && (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeaderBetween}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <PlusCircle size={16} color="#059669" style={{ marginRight: 6 }} />
+                <Text style={styles.sectionTitle}>Additional Work & Services</Text>
+              </View>
+              {!isReadyForDelivery && (
+                <TouchableOpacity
+                  style={styles.editSectionBtn}
+                  activeOpacity={0.7}
+                  onPress={() =>
+                    navigation?.navigate('AddAdditionalWorkScreen', {
+                      card: { ...card, currentServices: services },
+                      department: route?.params?.department || null,
+                      activeTab: route?.params?.activeTab || null,
+                      onSaveAdditionalWork: (newItems) => {
+                        setAdditionalWorkList(prev => [...prev, ...newItems]);
+                        setServicesList(prev => {
+                          const existingIds = new Set(prev.map(p => p.id));
+                          const toAdd = newItems.filter(item => !existingIds.has(item.id)).map(item => ({
+                            ...item,
+                            qty: item.qty || 'x1',
+                          }));
+                          return [...prev, ...toAdd];
+                        });
+                        fetchJobCardDetail();
                       },
-                    ]}
-                  >
-                    <View style={[styles.smallDot, { backgroundColor: stBadge.dot }]} />
-                    <Text
+                    })
+                  }
+                >
+                  <Pencil size={12} color="#059669" style={{ marginRight: 4 }} />
+                  <Text style={[styles.editSectionBtnText, { color: '#059669' }]}>Edit / Add</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Table Header */}
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableHeadText, { flex: 2.5 }]}>Service Description</Text>
+              <Text style={[styles.tableHeadText, { flex: 1.5, textAlign: 'center' }]}>Status</Text>
+              <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'right' }]}>Rate</Text>
+            </View>
+
+            {additionalWork.map((item, idx) => {
+              const stBadge = getStatusBadgeConfig(item.status);
+              return (
+                <View
+                  key={item.id || idx}
+                  style={[
+                    styles.tableRow,
+                    idx === additionalWork.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                >
+                  <Text style={[styles.tableCellText, { flex: 2.5 }]}>{item.name}</Text>
+                  <View style={{ flex: 1.5, alignItems: 'center' }}>
+                    <View
                       style={[
-                        styles.statusPillTextSmall,
-                        { color: stBadge.text },
+                        styles.statusPillSmall,
+                        {
+                          backgroundColor: stBadge.bg,
+                          borderColor: stBadge.border,
+                          borderWidth: 1,
+                        },
                       ]}
                     >
-                      {item.status || 'Pending'}
-                    </Text>
+                      <View style={[styles.smallDot, { backgroundColor: stBadge.dot }]} />
+                      <Text
+                        style={[
+                          styles.statusPillTextSmall,
+                          { color: stBadge.text },
+                        ]}
+                      >
+                        {item.status || 'Pending'}
+                      </Text>
+                    </View>
                   </View>
+                  <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
+                    {item.rate}
+                  </RupeeFormatText>
                 </View>
-                <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
-                  {item.rate}
-                </RupeeFormatText>
-              </View>
-            );
-          })}
-        </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* 3.5 Additional Work Messages & Voice Notes */}
         {card.approvals && card.approvals.filter(a => a.explanation || a.voiceNoteUrl).length > 0 && (

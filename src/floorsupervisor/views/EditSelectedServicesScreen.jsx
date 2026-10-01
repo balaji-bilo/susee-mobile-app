@@ -181,37 +181,7 @@ export function EditSelectedServicesScreen({ route, navigation }) {
       }
     }
 
-    // 3. Department sequence check (Body Shop cannot start before Mechanical is complete)
-    for (const targetService of servicesList) {
-      const stNorm = String(targetService.status || '').toUpperCase().replace(/\s+/g, '_');
-      const isProgressing = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'ONGOING'].some(st => stNorm.includes(st));
-
-      const isBodyShop = (
-        (targetService.category || targetService.categorySlug || targetService.name || '').toLowerCase().includes('body') ||
-        (targetService.category || targetService.categorySlug || targetService.name || '').toLowerCase().includes('paint') ||
-        (targetService.category || targetService.categorySlug || targetService.name || '').toLowerCase().includes('dent')
-      );
-
-      if (isBodyShop && isProgressing) {
-        const incompleteMechanical = servicesList.some(s => {
-          const sIsBody = (
-            (s.category || s.categorySlug || s.name || '').toLowerCase().includes('body') ||
-            (s.category || s.categorySlug || s.name || '').toLowerCase().includes('paint') ||
-            (s.category || s.categorySlug || s.name || '').toLowerCase().includes('dent')
-          );
-          if (sIsBody) return false;
-          const sStatus = String(s.status || '').toUpperCase();
-          return !sStatus.includes('COMPLETED') && !sStatus.includes('POSTPONED') && !sStatus.includes('REJECTED') && !sStatus.includes('CANCELLED');
-        });
-
-        if (incompleteMechanical) {
-          Toast.show('Previous service stage must be completed before updating this service status', Toast.LONG);
-          return;
-        }
-      }
-    }
-
-    // 4. Validate In Progress without mechanic assigned
+    // 3. Validate In Progress without mechanic assigned
     const hasAssignedMechanic = Boolean(card?.mechanic && card.mechanic !== 'Unassigned') || Boolean(card?.technician) || (card?.assignedMechanics && card.assignedMechanics.length > 0) || (card?.workAssignments && card.workAssignments.some(a => !!a.assignedUserId || !!a.assignedUser));
     for (const s of servicesList) {
       const stNorm = String(s.status || '').toUpperCase().replace(/\s+/g, '_');

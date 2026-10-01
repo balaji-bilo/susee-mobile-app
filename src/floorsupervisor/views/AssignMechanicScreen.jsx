@@ -88,6 +88,8 @@ const CardSkeleton = () => {
 
 export function AssignMechanicScreen() {
   const insets = useSafeAreaInsets();
+  const flatListRef = React.useRef(null);
+  const tabsScrollViewRef = React.useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedJobCard, setSelectedJobCard] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -166,6 +168,19 @@ export function AssignMechanicScreen() {
     setPage(1);
     fetchRequests(1, true);
   };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      setActiveTab('MECHANICAL');
+      setSearchQuery('');
+      if (tabsScrollViewRef.current) {
+        tabsScrollViewRef.current.scrollTo({ x: 0, y: 0, animated: false });
+      }
+      if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({ offset: 0, animated: false });
+      }
+    }, [])
+  );
 
   React.useEffect(() => {
     setPage(1);
@@ -288,6 +303,7 @@ export function AssignMechanicScreen() {
         {/* Horizontal Department Pill Tabs */}
         <View style={styles.tabsContainer}>
           <ScrollView
+            ref={tabsScrollViewRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.tabsScrollContent}
@@ -342,6 +358,7 @@ export function AssignMechanicScreen() {
           </ScrollView>
         ) : (
           <FlatList
+            ref={flatListRef}
             data={requests}
             keyExtractor={(item, index) => item.id + '_' + index.toString()}
             contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}

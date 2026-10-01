@@ -157,10 +157,15 @@ export function AdditionalWorkScreen() {
 
   const isFirstMount = useRef(true);
   const flatListRef = useRef(null);
+  const tabsScrollViewRef = useRef(null);
 
   useFocusEffect(
     useCallback(() => {
       setSelectedStatusFilter('ALL');
+      setSearchQuery('');
+      if (tabsScrollViewRef.current) {
+        tabsScrollViewRef.current.scrollTo({ x: 0, y: 0, animated: false });
+      }
       if (flatListRef.current) {
         flatListRef.current.scrollToOffset({ animated: false, offset: 0 });
       }
@@ -360,6 +365,7 @@ export function AdditionalWorkScreen() {
         {/* Horizontal Filter Pill Tabs */}
         <View style={styles.tabsContainer}>
           <ScrollView
+            ref={tabsScrollViewRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.tabsScrollContent}

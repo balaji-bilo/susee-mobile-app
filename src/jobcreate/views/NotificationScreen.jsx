@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, FlatList, ScrollView, RefreshControl, ActivityIndicator, Modal, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../common/config/theme';
@@ -8,6 +8,7 @@ import { base_url, notification_list, notification_marked } from '../../common/c
 import { retrieveEncryptedData } from '../../common/config/storage';
 import axios from 'axios';
 import { NotificationSkeleton } from '../components/loading/NotificationSkeleton';
+import { useFocusEffect } from '@react-navigation/native';
 
 const formatWaitingTime = (mins) => {
   const m = mins || 0;
@@ -135,6 +136,12 @@ export function NotificationScreen({ navigation }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const iconScaleAnim = useRef(new Animated.Value(0)).current;
+
+  useFocusEffect(
+    useCallback(() => {
+      setActiveTab('unread');
+    }, [])
+  );
 
   const fetchWaitingQueue = async (showLoadingIndicator = true, tab = activeTab, pageNum = 1) => {
     const unreadParam = tab === 'unread' ? '&unreadOnly=true' : '';
