@@ -5,8 +5,8 @@ import { storeEncryptedData, retrieveEncryptedData } from '../../common/config/s
 import axios from 'axios';
 import { base_url, save_fcm_token } from '../../common/config/constant';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
-
-export const navigationRef = React.createRef();
+import { navigationRef } from '../../common/navigation/navigationRef';
+export { navigationRef };
 
 const requestNotificationPermission = async () => {
   if (Platform.OS === 'android' && Platform.Version >= 33) {
@@ -46,16 +46,80 @@ export const getFcmToken = async () => {
   return null;
 };
 
-export const notification_redirection = (data) => {
+export const notification_redirection = async (data = {}) => {
   console.log('Handling redirection with data:', data);
 
-  const navigation = navigationRef.current;
-  if (!navigation) {
-    console.warn('Navigation reference is not ready yet');
+  const jcId = data.jobCardId || data.id;
+  const geId = data.gateEntryId;
+  const vNo = data.vehicleNumber || data.vehicleNo || '';
+
+  const storedRole = await retrieveEncryptedData('roleName');
+  const normalizedRole = String(storedRole || '').toLowerCase().replace(/\s+/g, '-');
+
+  const nav = (screen, params) => {
+    if (navigationRef.isReady && navigationRef.isReady()) {
+      navigationRef.navigate(screen, params);
+    } else if (navigationRef.current) {
+      navigationRef.current.navigate(screen, params);
+    } else {
+      console.warn('Navigation reference is not ready yet');
+    }
+  };
+
+  const msg = `${data.title || ''} ${data.message || data.body || ''}`.toLowerCase();
+  const isAssignMechanic =
+    msg.includes('unassigned') ||
+    msg.includes('assignment_pending') ||
+    msg.includes('assignment pending') ||
+    msg.includes('without a mechanic') ||
+    msg.includes('without a bay') ||
+    msg.includes('assign mechanic') ||
+    msg.includes('assign technician') ||
+    msg.includes('assign bay') ||
+    /\b(assignment\s*pending|pending\s*assignment)\b/i.test(msg) ||
+    /\bassign\s*(mechanic|technician|bay)\b/i.test(msg);
+
+  if (normalizedRole === 'floor-supervisor' || normalizedRole === 'manager') {
+    if (isAssignMechanic) {
+      nav('AssignMechanic', { jobCardId: jcId, vehicleNo: vNo });
+      return;
+    }
+    if (jcId) {
+      nav('FloorJobCardViewScreen', { jobCardId: jcId, vehicleNo: vNo });
+      return;
+    }
+    nav('FloorJobCards');
     return;
   }
 
-  navigation.navigate('Notification');
+  if (normalizedRole === 'crm-team' && (geId || vNo)) {
+    nav('JobCardWizard', {
+      selectedVehicle: {
+        id: String(geId || Date.now()),
+        gateEntryId: geId,
+        vehicleNumber: vNo,
+        entryType: 'SERVICE',
+      },
+    });
+    return;
+  }
+
+  nav('Notification');
+};
+
+const setupNotificationChannel = async () => {
+  try {
+    await notifee.createChannel({
+      id: 'default',
+      name: 'Default Channel',
+      importance: AndroidImportance.HIGH,
+      sound: 'default',
+      vibration: true,
+      badge: true,
+    });
+  } catch (err) {
+    console.warn('Error setting up notification channel:', err);
+  }
 };
 
 const listenToMessages = () => {
@@ -65,18 +129,13 @@ const listenToMessages = () => {
     if (remoteMessage.notification) {
       try {
         await notifee.requestPermission();
-
-        const channelId = await notifee.createChannel({
-          id: 'default',
-          name: 'Default Channel',
-          importance: AndroidImportance.HIGH,
-        });
+        await setupNotificationChannel();
 
         await notifee.displayNotification({
           title: remoteMessage.notification.title,
           body: remoteMessage.notification.body,
           android: {
-            channelId,
+            channelId: 'default',
             importance: AndroidImportance.HIGH,
             smallIcon: 'ic_stat_notification',
             pressAction: {
@@ -122,6 +181,7 @@ const listenToMessages = () => {
     console.log('FCM Token refreshed:', newToken);
     await storeEncryptedData('fcm_token', newToken);
     global.fcm_token = newToken;
+    await sendTokenToBackend(newToken);
   });
 };
 
@@ -180,8 +240,12 @@ export const NotificationService = {
   init: async () => {
     try {
       const granted = await requestNotificationPermission();
+      await setupNotificationChannel();
       if (granted) {
-        await getFcmToken();
+        const fcmToken = await getFcmToken();
+        if (fcmToken) {
+          await sendTokenToBackend(fcmToken);
+        }
         listenToMessages();
       } else {
         console.log('Notification permission denied by user.');

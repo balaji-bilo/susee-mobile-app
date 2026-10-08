@@ -9,6 +9,7 @@ import { retrieveEncryptedData } from '../../common/config/storage';
 import axios from 'axios';
 import { NotificationSkeleton } from '../components/loading/NotificationSkeleton';
 import { useFocusEffect } from '@react-navigation/native';
+import socketService from '../../common/services/socketService';
 
 const formatWaitingTime = (mins) => {
   const m = mins || 0;
@@ -123,7 +124,7 @@ const defaultMockNotifications = [
 ];
 
 export function NotificationScreen({ navigation }) {
-  const [notifications, setNotifications] = useState(defaultMockNotifications);
+  const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('unread');
@@ -132,7 +133,7 @@ export function NotificationScreen({ navigation }) {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [tabCounts, setTabCounts] = useState({ all: 4, unread: 2 });
+  const [tabCounts, setTabCounts] = useState({ all: 0, unread: 0 });
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const iconScaleAnim = useRef(new Animated.Value(0)).current;
@@ -140,8 +141,37 @@ export function NotificationScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       setActiveTab('unread');
+      setPage(1);
+      fetchWaitingQueue(true, 'unread', 1);
+      fetchTabCounts();
     }, [])
   );
+
+  const fetchTabCounts = async () => {
+    try {
+      const token = await retrieveEncryptedData('token');
+      if (!token) return;
+
+      const [unreadRes, allRes] = await Promise.allSettled([
+        axios.get(`${base_url}/notifications/unread-count`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        axios.get(`${base_url}${notification_list}?page=1&limit=1`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ]);
+
+      const unreadCount = unreadRes.status === 'fulfilled' ? (unreadRes.value.data?.data?.count ?? 0) : 0;
+      const allCount = allRes.status === 'fulfilled' ? (allRes.value.data?.data?.pagination?.total ?? 0) : 0;
+
+      setTabCounts({
+        all: allCount,
+        unread: unreadCount,
+      });
+    } catch (err) {
+      console.warn('Error fetching notification tab counts:', err?.message);
+    }
+  };
 
   const fetchWaitingQueue = async (showLoadingIndicator = true, tab = activeTab, pageNum = 1) => {
     const unreadParam = tab === 'unread' ? '&unreadOnly=true' : '';
@@ -153,8 +183,6 @@ export function NotificationScreen({ navigation }) {
       setLoadingMore(true);
     }
 
-    const filterMock = (t) => t === 'unread' ? defaultMockNotifications.filter(n => !n.isRead) : defaultMockNotifications;
-
     try {
       const token = await retrieveEncryptedData('token');
       const response = await axios.get(`${base_url}${notification_list}?page=${pageNum}${unreadParam}`, {
@@ -165,63 +193,63 @@ export function NotificationScreen({ navigation }) {
 
       console.log('Notification Response Data:', response.data);
 
-      if (response.data && response.data.success && response.data.data?.notifications && response.data.data.notifications.length > 0) {
-        const mapped = response.data.data.notifications
-          .map(item => {
-            let parsedVehicleNo = extractVehicleNumber(item.message);
-            if (item.gateEntry?.vehicle?.registrationNumber) parsedVehicleNo = item.gateEntry.vehicle.registrationNumber;
-            else if (item.jobCard?.vehicle?.registrationNumber) parsedVehicleNo = item.jobCard.vehicle.registrationNumber;
-            else if (item.vehicle?.registrationNumber) parsedVehicleNo = item.vehicle.registrationNumber;
+      if (response.data && response.data.success && Array.isArray(response.data.data?.notifications)) {
+        const rawList = response.data.data.notifications;
 
-            const createdDate = item.createdAt ? new Date(item.createdAt) : new Date();
-            const now = new Date();
-            const diffMins = Math.max(0, Math.floor((now - createdDate) / (1000 * 60)));
+        const mapped = rawList.map(item => {
+          let parsedVehicleNo = extractVehicleNumber(item.message);
+          if (item.gateEntry?.vehicle?.registrationNumber) parsedVehicleNo = item.gateEntry.vehicle.registrationNumber;
+          else if (item.jobCard?.vehicle?.registrationNumber) parsedVehicleNo = item.jobCard.vehicle.registrationNumber;
+          else if (item.vehicle?.registrationNumber) parsedVehicleNo = item.vehicle.registrationNumber;
 
-            const title = item.title || 'Notification';
-            const message = item.message || '';
-            const itemType = item.type || '';
+          const createdDate = item.createdAt ? new Date(item.createdAt) : new Date();
+          const now = new Date();
+          const diffMins = Math.max(0, Math.floor((now - createdDate) / (1000 * 60)));
 
-            const isCompleted = itemType === 'COMPLETION_ALERT' || title.toLowerCase().includes('completed');
-            const isReadyForDelivery = itemType === 'READY_FOR_DELIVERY_ALERT' || title.toLowerCase().includes('ready for delivery');
+          const title = item.title || 'Notification';
+          const message = item.message || '';
+          const itemType = item.type || '';
 
-            const isFinished = isCompleted || isReadyForDelivery;
+          const isCompleted = itemType === 'COMPLETION_ALERT' || title.toLowerCase().includes('completed');
+          const isReadyForDelivery = itemType === 'READY_FOR_DELIVERY_ALERT' || title.toLowerCase().includes('ready for delivery');
 
-            let type = isFinished ? 'success' : 'warning';
-            let statusText = title.toUpperCase();
+          const isFinished = isCompleted || isReadyForDelivery;
 
-            let buttonText = 'Create Job Card';
-            if (isReadyForDelivery) buttonText = 'Ready for Delivery';
-            else if (isCompleted) buttonText = 'Completed';
+          let type = isFinished ? 'success' : 'warning';
+          let statusText = title.toUpperCase();
 
-            return {
-              id: String(item.id),
-              type,
-              isFinished,
-              isReadyForDelivery,
-              buttonText,
-              vehicleNumber: parsedVehicleNo,
-              customerMobile: item.gateEntry?.customer?.mobileNo || '',
-              serviceType: statusText,
-              title,
-              message,
-              waitingTime: formatWaitingTime(diffMins),
-              waitTime: diffMins,
-              rawItem: {
-                id: item.gateEntryId || item.id,
-                gateEntryId: item.gateEntryId,
-                vehicle: {
-                  registrationNumber: parsedVehicleNo
-                },
-                customer: item.gateEntry?.customer ? {
-                  name: '',
-                  mobileNo: item.gateEntry.customer.mobileNo || '',
-                  alternateMobileNo: item.gateEntry.customer.alternateMobileNo || ''
-                } : undefined,
-                entryType: item.gateEntry?.entryType || 'SERVICE'
-              }
-            };
-          })
-          .sort((a, b) => a.waitTime - b.waitTime);
+          let buttonText = 'Create Job Card';
+          if (isReadyForDelivery) buttonText = 'Ready for Delivery';
+          else if (isCompleted) buttonText = 'Completed';
+
+          return {
+            id: String(item.id),
+            type,
+            isFinished,
+            isReadyForDelivery,
+            buttonText,
+            vehicleNumber: parsedVehicleNo,
+            customerMobile: item.gateEntry?.customer?.mobileNo || '',
+            serviceType: statusText,
+            title,
+            message,
+            waitingTime: formatWaitingTime(diffMins),
+            waitTime: diffMins,
+            rawItem: {
+              id: item.gateEntryId || item.id,
+              gateEntryId: item.gateEntryId,
+              vehicle: {
+                registrationNumber: parsedVehicleNo
+              },
+              customer: item.gateEntry?.customer ? {
+                name: '',
+                mobileNo: item.gateEntry.customer.mobileNo || '',
+                alternateMobileNo: item.gateEntry.customer.alternateMobileNo || ''
+              } : undefined,
+              entryType: item.gateEntry?.entryType || 'SERVICE'
+            }
+          };
+        }).sort((a, b) => a.waitTime - b.waitTime);
 
         setNotifications(prev => {
           const combined = pageNum === 1 ? mapped : [...prev, ...mapped];
@@ -229,24 +257,21 @@ export function NotificationScreen({ navigation }) {
           return combined;
         });
 
-        let hasMoreData = false;
         if (response.data.data.pagination) {
           const totalCount = response.data.data.pagination.total;
           setTabCounts(prev => ({ ...prev, [tab]: totalCount }));
-          hasMoreData = pageNum < response.data.data.pagination.totalPages;
-          setHasMore(hasMoreData);
+          setHasMore(pageNum < response.data.data.pagination.totalPages);
         } else {
-          hasMoreData = response.data.data.notifications.length > 0;
-          setHasMore(hasMoreData);
+          setHasMore(rawList.length > 0);
         }
       } else if (pageNum === 1) {
-        setNotifications(filterMock(tab));
+        setNotifications([]);
         setHasMore(false);
       }
     } catch (error) {
-      console.log('Error fetching notifications, loading static mock fallback');
+      console.log('Error fetching notifications:', error?.response?.data || error?.message);
       if (pageNum === 1) {
-        setNotifications(filterMock(tab));
+        setNotifications([]);
       }
     } finally {
       setLoading(false);
@@ -257,12 +282,29 @@ export function NotificationScreen({ navigation }) {
 
   useEffect(() => {
     fetchWaitingQueue(true, 'unread', 1);
-  }, []);
+    fetchTabCounts();
+
+    const handleRealtimeUpdate = () => {
+      fetchWaitingQueue(false, activeTab, 1);
+      fetchTabCounts();
+    };
+
+    socketService.on('notification-created', handleRealtimeUpdate);
+    socketService.on('notification-read', handleRealtimeUpdate);
+    socketService.on('notification-read-all', handleRealtimeUpdate);
+
+    return () => {
+      socketService.off('notification-created', handleRealtimeUpdate);
+      socketService.off('notification-read', handleRealtimeUpdate);
+      socketService.off('notification-read-all', handleRealtimeUpdate);
+    };
+  }, [activeTab]);
 
   const onRefresh = () => {
     setRefreshing(true);
     setPage(1);
     fetchWaitingQueue(false, activeTab, 1);
+    fetchTabCounts();
   };
 
   const handleTabChange = (tab) => {
@@ -270,6 +312,7 @@ export function NotificationScreen({ navigation }) {
     setPage(1);
     setNotifications([]);
     fetchWaitingQueue(true, tab, 1);
+    fetchTabCounts();
   };
 
   const handleLoadMore = () => {
@@ -290,9 +333,20 @@ export function NotificationScreen({ navigation }) {
   };
 
   const handleMarkAsRead = async (id) => {
+    const numericId = parseInt(id, 10);
+    if (isNaN(numericId) || numericId <= 0) {
+      // Mock / fallback item: update state locally without throwing an API error
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      setTabCounts(prev => ({
+        ...prev,
+        unread: Math.max(0, (prev.unread || 1) - 1)
+      }));
+      return;
+    }
+
     try {
       const token = await retrieveEncryptedData('token');
-      const response = await axios.put(`${base_url}${notification_marked}/${id}`, {}, {
+      const response = await axios.put(`${base_url}${notification_marked}/${numericId}`, {}, {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -331,12 +385,13 @@ export function NotificationScreen({ navigation }) {
     if (activeTab === 'unread') {
       handleMarkAsRead(item.id);
     }
-
     setSelectedNotification({
       title: item.title,
       message: item.message,
       vehicleNumber: item.vehicleNumber,
-      entryType: item.serviceType
+      entryType: item.serviceType,
+      customerMobile: item.customerMobile,
+      waitingTime: item.waitingTime,
     });
     setModalVisible(true);
 
@@ -368,37 +423,37 @@ export function NotificationScreen({ navigation }) {
   const getIcon = (type) => {
     switch (type) {
       case 'warning':
-        return <AlertTriangle size={16} color="#D97706" />;
+        return <AlertTriangle size={15} color="#D97706" />;
       case 'success':
-        return <Check size={16} color="#10B981" />;
+        return <Check size={15} color="#10B981" />;
       default:
-        return <Info size={16} color={colors.primary} />;
+        return <Info size={15} color={colors.primary} />;
     }
   };
 
   const getBadgeStyle = (type) => {
     switch (type) {
       case 'warning':
-        return { bg: '#FFF7ED', border: '#D97706' };
+        return { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706' };
       case 'success':
-        return { bg: '#ECFDF5', border: '#10B981' };
+        return { bg: '#ECFDF5', border: '#A7F3D0', text: '#10B981' };
       default:
-        return { bg: colors.primarySoft, border: colors.primary };
+        return { bg: '#EFF6FF', border: '#BFDBFE', text: colors.primary };
     }
   };
 
   const getDynamicTitleColor = (title) => {
     const t = (title || '').toLowerCase();
     if (t.includes('delayed')) {
-      return { bg: '#FEE2E2', text: '#DC2626' };
+      return { bg: '#FEF2F2', border: '#FECACA', text: '#DC2626' };
     }
     if (t.includes('completed') || t.includes('ready for delivery')) {
-      return { bg: '#D1FAE5', text: '#059669' };
+      return { bg: '#ECFDF5', border: '#A7F3D0', text: '#059669' };
     }
-    if (t.includes('waiting')) {
-      return { bg: '#FEF3C7', text: '#D97706' };
+    if (t.includes('waiting') || t.includes('pending')) {
+      return { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706' };
     }
-    return null;
+    return { bg: '#EFF6FF', border: '#BFDBFE', text: '#2563EB' };
   };
 
   return (
@@ -409,7 +464,7 @@ export function NotificationScreen({ navigation }) {
           <ChevronLeft size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Queue Alerts</Text>
-        <View style={{ width: 40 }} />
+        <View style={{ width: 38 }} />
       </View>
 
       {/* Tabs Selector */}
@@ -462,53 +517,65 @@ export function NotificationScreen({ navigation }) {
           ListFooterComponent={renderFooter}
           renderItem={({ item }) => {
             const badge = getBadgeStyle(item.type);
+            const statusConfig = getDynamicTitleColor(item.title);
             const badgeColor = item.type === 'warning' ? '#D97706' : item.type === 'success' ? '#10B981' : colors.primary;
+
             return (
               <View style={styles.notificationCard}>
                 <TouchableOpacity
                   onPress={() => handleCardPress(item)}
                   activeOpacity={0.7}
+                  style={styles.cardInner}
                 >
-                  {/* Header: Status, Vehicle and Service details */}
-                  <View style={styles.cardHeader}>
-                    <View style={[styles.iconCircle, { backgroundColor: badge.bg }]}>
-                      {getIcon(item.type)}
-                    </View>
-                    <View style={styles.headerInfo}>
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={styles.vehicleNumber}>{item.vehicleNumber}</Text>
-                          <View style={[
-                            styles.serviceBadge,
-                            getDynamicTitleColor(item.title) && { backgroundColor: getDynamicTitleColor(item.title).bg }
-                          ]}>
-                            <Text style={[
-                              styles.serviceText,
-                              getDynamicTitleColor(item.title) && { color: getDynamicTitleColor(item.title).text }
-                            ]}>{item.serviceType}</Text>
-                          </View>
-                        </View>
-
-                        {item.customerMobile ? (
-                          <View style={styles.customerMobileContainer}>
-                            <Phone size={11} color={colors.mutedText} />
-                            <Text style={styles.customerMobileText}>{item.customerMobile}</Text>
-                          </View>
-                        ) : null}
-                        {item.message ? (
-                          <Text style={{ fontSize: 12, color: colors.mutedText, marginTop: 4, fontStyle: 'italic' }} numberOfLines={1}>
-                            {item.message}
-                          </Text>
-                        ) : null}
+                  {/* Top Row: Vehicle Plate + Waiting Time */}
+                  <View style={styles.cardTopRow}>
+                    <View style={styles.vehicleRow}>
+                      <View style={[styles.iconCircle, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                        {getIcon(item.type)}
                       </View>
+                      <Text style={styles.vehicleNumber}>{item.vehicleNumber}</Text>
                     </View>
-                    <View style={styles.waitingBadge}>
+
+                    <View style={styles.timeBadge}>
                       <Clock size={11} color={badgeColor} />
-                      <Text style={[styles.waitingLabel, { color: badgeColor }]}>
+                      <Text style={[styles.timeText, { color: badgeColor }]}>
                         {item.waitingTime}
                       </Text>
                     </View>
                   </View>
+
+                  {/* Status Row: Badges & Details */}
+                  <View style={styles.statusRow}>
+                    <View style={[
+                      styles.serviceBadge,
+                      { backgroundColor: statusConfig.bg, borderColor: statusConfig.border }
+                    ]}>
+                      <View style={[styles.statusDot, { backgroundColor: statusConfig.text }]} />
+                      <Text
+                        style={[styles.serviceText, { color: statusConfig.text }]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {item.serviceType}
+                      </Text>
+                    </View>
+
+                    {item.customerMobile ? (
+                      <View style={styles.customerMobileContainer}>
+                        <Phone size={11} color="#64748B" />
+                        <Text style={styles.customerMobileText}>{item.customerMobile}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {/* Message Detail Box */}
+                  {item.message ? (
+                    <View style={styles.messageBox}>
+                      <Text style={styles.messageText} numberOfLines={2}>
+                        {item.message}
+                      </Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
               </View>
             );
@@ -541,16 +608,36 @@ export function NotificationScreen({ navigation }) {
               {/* Notification details */}
               <View style={styles.modalInfoContainer}>
                 {selectedNotification?.message ? (
-                  <Text style={{ fontSize: 14, color: colors.text, textAlign: 'center', marginBottom: 12, lineHeight: 20 }}>
+                  <Text style={{ fontSize: 13.5, color: '#334155', textAlign: 'center', marginBottom: 12, lineHeight: 19 }}>
                     {selectedNotification.message}
                   </Text>
                 ) : null}
-                <Text style={styles.modalInfoLabel}>
-                  Vehicle Number: <Text style={styles.modalInfoValue}>{selectedNotification?.vehicleNumber}</Text>
-                </Text>
-                <Text style={styles.modalInfoLabel}>
-                  Entry Type: <Text style={styles.modalInfoValue}>{selectedNotification?.entryType}</Text>
-                </Text>
+
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalInfoLabel}>Vehicle Number</Text>
+                  <Text style={styles.modalInfoValue}>{selectedNotification?.vehicleNumber || 'N/A'}</Text>
+                </View>
+
+                {selectedNotification?.customerMobile ? (
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoLabel}>Mobile Number</Text>
+                    <Text style={styles.modalInfoValue}>{selectedNotification.customerMobile}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalInfoLabel}>Alert Stage</Text>
+                  <Text style={[styles.modalInfoValue, { flex: 1, textAlign: 'right' }]} numberOfLines={2}>
+                    {selectedNotification?.entryType}
+                  </Text>
+                </View>
+
+                {selectedNotification?.waitingTime ? (
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoLabel}>Elapsed Time</Text>
+                    <Text style={styles.modalInfoValue}>{selectedNotification.waitingTime}</Text>
+                  </View>
+                ) : null}
               </View>
 
               <TouchableOpacity

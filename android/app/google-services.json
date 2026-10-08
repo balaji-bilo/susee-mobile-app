@@ -1,13 +1,32 @@
 {
   "project_info": {
-    "project_number": "531156728327",
-    "project_id": "dvsos-26e39",
-    "storage_bucket": "dvsos-26e39.firebasestorage.app"
+    "project_number": "78420628886",
+    "project_id": "dvsos-138ee",
+    "storage_bucket": "dvsos-138ee.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:531156728327:android:05417600a9e242bfc6c8a2",
+        "mobilesdk_app_id": "1:78420628886:android:eb5766cb1571304b2fb9b7",
+        "android_client_info": {
+          "package_name": "com.job_card"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHEGUpM9QQpRUg637sa85CccoTBJowjJA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:78420628886:android:f1e8edcd7b10a4612fb9b7",
         "android_client_info": {
           "package_name": "com.suseemotors.dvsos"
         }
@@ -15,7 +34,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAwTrPAKBgWvQmdXrZBE_7LDRmwfX3wZuM"
+          "current_key": "AIzaSyDHEGUpM9QQpRUg637sa85CccoTBJowjJA"
         }
       ],
       "services": {

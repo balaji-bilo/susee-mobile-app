@@ -150,11 +150,14 @@ export const ServicesBillingStep = forwardRef(function ServicesBillingStep({
                     No services available
                   </Text>
                 ) : (
-                  catalog.map((catalogItem) => {
-                    const alreadyAdded = selectedItems.some(s => s.serviceItem === catalogItem.label);
+                  catalog.map((catalogItem, index) => {
+                    const alreadyAdded = selectedItems.some(
+                      s => s.id === catalogItem.id || s.serviceItemId === catalogItem.id || s.serviceItem === catalogItem.label
+                    );
+                    const itemKey = catalogItem.id ? `catalog-${catalogItem.id}` : `catalog-${index}-${catalogItem.label}`;
                     return (
                       <TouchableOpacity
-                        key={catalogItem.label}
+                        key={itemKey}
                         onPress={() => handleSelectService(catalogItem)}
                         style={styles.catalogItemRow}
                       >

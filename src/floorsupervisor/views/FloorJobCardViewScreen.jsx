@@ -55,13 +55,29 @@ function formatVehicleNumber(num) {
   return clean;
 }
 
+export function formatStatusLabel(status) {
+  if (!status) return 'Pending';
+  const norm = String(status).trim().toLowerCase().replace(/[\s_]+/g, '');
+  if (norm === 'inprogress' || norm === 'ongoing') return 'In Progress';
+  if (norm === 'completed' || norm === 'done') return 'Completed';
+  if (norm === 'pending') return 'Pending';
+  if (norm === 'assigned') return 'Assigned';
+  if (norm === 'rejected' || norm === 'cancelled') return 'Rejected';
+  if (norm === 'postponed') return 'Postponed';
+
+  return String(status)
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
 function getStatusBadgeConfig(statusName) {
-  const norm = (statusName || '').toLowerCase();
-  
+  const norm = (statusName || '').toLowerCase().replace(/[\s_]+/g, '');
+
   if (norm.includes('completed') || norm === 'done') {
     return { bg: '#ECFDF5', border: '#A7F3D0', text: '#059669', dot: '#059669' };
   }
-  if (norm.includes('in progress') || norm.includes('ongoing')) {
+  if (norm.includes('inprogress') || norm.includes('ongoing')) {
     return { bg: '#EEF2FF', border: '#C7D2FE', text: '#4F46E5', dot: '#4F46E5' };
   }
   if (norm.includes('assigned')) {
@@ -73,7 +89,7 @@ function getStatusBadgeConfig(statusName) {
   if (norm.includes('postponed')) {
     return { bg: '#F1F5F9', border: '#CBD5E1', text: '#64748B', dot: '#64748B' };
   }
-  
+
   // Default (Pending, etc.)
   return { bg: '#FFFBEB', border: '#FDE68A', text: '#D97706', dot: '#D97706' };
 }
@@ -124,7 +140,7 @@ export function FloorJobCardViewScreen({ route, navigation }) {
           onPress: async () => {
             try {
               Toast.show('Downloading audio...', Toast.SHORT);
-              
+
               let rawFileName = url.substring(url.lastIndexOf('/') + 1) || '';
               rawFileName = rawFileName.split('?')[0]; // Strip URL parameters
               if (!rawFileName || !rawFileName.includes('.')) {
@@ -141,7 +157,7 @@ export function FloorJobCardViewScreen({ route, navigation }) {
                 fromUrl: url,
                 toFile: downloadDest,
               }).promise;
-              
+
               if (result.statusCode === 200) {
                 if (Platform.OS === 'android') {
                   try {
@@ -193,14 +209,14 @@ export function FloorJobCardViewScreen({ route, navigation }) {
           fromUrl: url,
           toFile: localPath,
         }).promise;
-        
+
         if (downloadResult.statusCode !== 200) {
           throw new Error('Failed to download audio file');
         }
       }
 
       setDuration('00:00');
-      
+
       await audioRecorderPlayer.startPlayer(localPath);
       audioRecorderPlayer.addPlayBackListener((e) => {
         setPlayTime(audioRecorderPlayer.mmssss(Math.floor(e.currentPosition)).substring(0, 5));
@@ -284,18 +300,21 @@ export function FloorJobCardViewScreen({ route, navigation }) {
     ]
   };
 
-  const [cardData, setCardData] = useState(navCard || defaultCard);
+  const directJobCardId = route?.params?.jobCardId;
+  const initialCard = navCard || (directJobCardId ? { id: directJobCardId, jobCardId: directJobCardId, vehicleNo: route?.params?.vehicleNo || '' } : defaultCard);
+
+  const [cardData, setCardData] = useState(initialCard);
   const [servicesList, setServicesList] = useState(
-    navCard?.selectedServices || defaultCard.selectedServices
+    initialCard?.selectedServices || []
   );
   const [additionalWorkList, setAdditionalWorkList] = useState(
-    navCard?.additionalWork || defaultCard.additionalWork
+    initialCard?.additionalWork || []
   );
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchJobCardDetail = async (isRefresh = false) => {
-    const jcId = cardData?.jobCardId || cardData?.id || navCard?.jobCardId || navCard?.id;
+    const jcId = directJobCardId || navCard?.jobCardId || navCard?.id || cardData?.jobCardId || cardData?.id;
     if (!jcId) {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -388,8 +407,8 @@ export function FloorJobCardViewScreen({ route, navigation }) {
         const expDel = item.expectedDeliveryAt ? new Date(item.expectedDeliveryAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Pending';
 
         const statusCode = String(item.currentStatus?.statusCode || '').toUpperCase();
-        const isMechanicalPhase  = statusCode.includes('MECHANICAL');
-        const isBodyShopPhase    = statusCode.includes('BODY_SHOP');
+        const isMechanicalPhase = statusCode.includes('MECHANICAL');
+        const isBodyShopPhase = statusCode.includes('BODY_SHOP');
         const isReadyOrDelivered = statusCode.includes('READY_FOR_DELIVERY') || statusCode.includes('DELIVERED');
 
         const hasBodyShopServices = (item.services || []).some(s => {
@@ -400,28 +419,28 @@ export function FloorJobCardViewScreen({ route, navigation }) {
 
         const mechanicalStatus =
           isReadyOrDelivered || isBodyShopPhase ? 'completed' :
-          isMechanicalPhase || mechanicName !== 'Unassigned' ? 'active' : 'pending';
+            isMechanicalPhase || mechanicName !== 'Unassigned' ? 'active' : 'pending';
 
         const bodyShopStatus =
-          !hasBodyShopServices  ? 'pending' :
-          isReadyOrDelivered    ? 'completed' :
-          isBodyShopPhase       ? 'active' : 'pending';
+          !hasBodyShopServices ? 'pending' :
+            isReadyOrDelivered ? 'completed' :
+              isBodyShopPhase ? 'active' : 'pending';
 
         const approvals = item.approvals || [];
         const approvalStatus =
-          approvals.length === 0    ? 'pending' :
-          pendingApprovalsCount > 0 ? 'active'  : 'completed';
+          approvals.length === 0 ? 'pending' :
+            pendingApprovalsCount > 0 ? 'active' : 'completed';
         const approvalDesc =
-          approvals.length === 0    ? 'No approval required' :
-          pendingApprovalsCount > 0 ? `Pending — ${pendingApprovalsCount} items awaiting` : 'All approved';
+          approvals.length === 0 ? 'No approval required' :
+            pendingApprovalsCount > 0 ? `Pending — ${pendingApprovalsCount} items awaiting` : 'All approved';
 
         const newJobProgressSteps = [
-          { id: 1, title: 'Vehicle Entry',      desc: `${entryDate} · Gate Security`,                          status: 'completed' },
-          { id: 2, title: 'Job Card Created',   desc: `${createdDate} · CRM Team · ${estCostString} est.`,     status: 'completed' },
-          { id: 3, title: 'Mechanical Work',    desc: `Assigned to ${mechanicName} · ${bayName}`,              status: mechanicalStatus },
-          { id: 4, title: 'Customer Approvals', desc: approvalDesc,                                             status: approvalStatus },
-          { id: 5, title: 'Body Shop',          desc: hasBodyShopServices ? 'Body Shop Work' : 'Not required', status: bodyShopStatus },
-          { id: 6, title: 'Vehicle Delivery',   desc: isJobDelivered ? 'Delivered' : `Expected: ${expDel}`,    status: isJobDelivered ? 'completed' : 'pending' },
+          { id: 1, title: 'Vehicle Entry', desc: `${entryDate} · Gate Security`, status: 'completed' },
+          { id: 2, title: 'Job Card Created', desc: `${createdDate} · CRM Team · ${estCostString} est.`, status: 'completed' },
+          { id: 3, title: 'Mechanical Work', desc: `Assigned to ${mechanicName} · ${bayName}`, status: mechanicalStatus },
+          { id: 4, title: 'Customer Approvals', desc: approvalDesc, status: approvalStatus },
+          { id: 5, title: 'Body Shop', desc: hasBodyShopServices ? 'Body Shop Work' : 'Not required', status: bodyShopStatus },
+          { id: 6, title: 'Vehicle Delivery', desc: isJobDelivered ? 'Delivered' : `Expected: ${expDel}`, status: isJobDelivered ? 'completed' : 'pending' },
         ];
 
         setCardData(prev => ({
@@ -521,210 +540,209 @@ export function FloorJobCardViewScreen({ route, navigation }) {
             />
           }
         >
-        {/* Main Title Container */}
-        <View style={styles.detailTitleCard}>
-          <View style={styles.titleAccentLine} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.detailTitle}>Job Card: {card.id}</Text>
-            <Text style={styles.detailSubtitle}>Created on {card.created}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.imagesBtn}
-            activeOpacity={0.7}
-            onPress={() => navigation?.navigate('JobCardImagesScreen', { cardId: card.id, photos: card.photos })}
-          >
-            <LucideImage size={20} color="#3B82F6" />
-          </TouchableOpacity>
-        </View>
-
-        {/* JOB PROGRESS */}
-
-
-        {/* 1. Vehicle & Owner Details */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <Car size={16} color="#0D9488" style={{ marginRight: 6 }} />
-            <Text style={styles.sectionTitle}>Vehicle & Owner Details</Text>
+          {/* Main Title Container */}
+          <View style={styles.detailTitleCard}>
+            <View style={styles.titleAccentLine} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailTitle}>Job Card: {card.id}</Text>
+              <Text style={styles.detailSubtitle}>Created on {card.created}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.imagesBtn}
+              activeOpacity={0.7}
+              onPress={() => navigation?.navigate('JobCardImagesScreen', { cardId: card.id, photos: card.photos })}
+            >
+              <LucideImage size={20} color="#3B82F6" />
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.gridContainer}>
-            <View style={styles.gridCol}>
-              <Text style={styles.gridLabel}>Owner Name</Text>
-              <View style={styles.iconValRow}>
-                <User size={13} color="#64748B" />
-                <Text style={styles.gridVal}>{card.owner}</Text>
+          {/* JOB PROGRESS */}
+
+
+          {/* 1. Vehicle & Owner Details */}
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeaderRow}>
+              <Car size={16} color="#0D9488" style={{ marginRight: 6 }} />
+              <Text style={styles.sectionTitle}>Vehicle & Owner Details</Text>
+            </View>
+
+            <View style={styles.gridContainer}>
+              <View style={styles.gridCol}>
+                <Text style={styles.gridLabel}>Owner Name</Text>
+                <View style={styles.iconValRow}>
+                  <User size={13} color="#64748B" />
+                  <Text style={styles.gridVal}>{card.owner}</Text>
+                </View>
+              </View>
+
+              <View style={styles.gridCol}>
+                <Text style={styles.gridLabel}>Mobile Number</Text>
+                <Text style={styles.gridValBold}>{card.mobile}</Text>
               </View>
             </View>
 
-            <View style={styles.gridCol}>
-              <Text style={styles.gridLabel}>Mobile Number</Text>
-              <Text style={styles.gridValBold}>{card.mobile}</Text>
-            </View>
-          </View>
+            <View style={[styles.gridContainer, { marginTop: 12 }]}>
+              <View style={styles.gridCol}>
+                <Text style={styles.gridLabel}>Registration Number</Text>
+                <Text style={styles.gridValPlate}>{formatVehicleNumber(card.vehicleNo)}</Text>
+              </View>
 
-          <View style={[styles.gridContainer, { marginTop: 12 }]}>
-            <View style={styles.gridCol}>
-              <Text style={styles.gridLabel}>Registration Number</Text>
-              <Text style={styles.gridValPlate}>{formatVehicleNumber(card.vehicleNo)}</Text>
-            </View>
-
-            <View style={styles.gridCol}>
-              <Text style={styles.gridLabel}>Brand & Model</Text>
-              <Text style={styles.gridVal}>{card.brandModel || 'Tata Tata567 Tata67'}</Text>
-            </View>
-          </View>
-
-          <View style={[styles.gridContainer, { marginTop: 12 }]}>
-            <View style={styles.gridCol}>
-              <Text style={styles.gridLabel}>Expected Delivery Date</Text>
-              <View style={styles.iconValRow}>
-                <Calendar size={13} color="#0D9488" />
-                <Text style={styles.gridValTeal}>
-                  {card.expectedDelivery || '04 Sep 2026, 03:48 PM'}
-                </Text>
+              <View style={styles.gridCol}>
+                <Text style={styles.gridLabel}>Brand & Model</Text>
+                <Text style={styles.gridVal}>{card.brandModel || 'Tata Tata567 Tata67'}</Text>
               </View>
             </View>
 
-            <View style={styles.gridCol}>
-              <Text style={styles.gridLabel}>Service Type</Text>
-              <View style={styles.serviceTypeBadge}>
-                <Text style={styles.serviceTypeText}>{card.serviceType || 'SERVICE'}</Text>
+            <View style={[styles.gridContainer, { marginTop: 12 }]}>
+              <View style={styles.gridCol}>
+                <Text style={styles.gridLabel}>Expected Delivery Date</Text>
+                <View style={styles.iconValRow}>
+                  <Calendar size={13} color="#0D9488" />
+                  <Text style={styles.gridValTeal}>
+                    {card.expectedDelivery || '04 Sep 2026, 03:48 PM'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.gridCol}>
+                <Text style={styles.gridLabel}>Service Type</Text>
+                <View style={styles.serviceTypeBadge}>
+                  <Text style={styles.serviceTypeText}>{card.serviceType || 'SERVICE'}</Text>
+                </View>
               </View>
             </View>
           </View>
-        </View>
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderRow}>
-            <MapPin size={16} color="#EF4444" style={{ marginRight: 6 }} />
-            <Text style={[styles.sectionTitle, { color: '#475569', letterSpacing: 0.5 }]}>JOB PROGRESS</Text>
-          </View>
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeaderRow}>
+              <MapPin size={16} color="#EF4444" style={{ marginRight: 6 }} />
+              <Text style={[styles.sectionTitle, { color: '#475569', letterSpacing: 0.5 }]}>JOB PROGRESS</Text>
+            </View>
 
-          <View style={styles.timelineContainer}>
-            {jobProgressSteps.map((step, index) => {
-              const isLast = index === jobProgressSteps.length - 1;
-              let color = '#CBD5E1'; // pending
-              let lineStyle = { backgroundColor: '#E2E8F0' }; // default gray line
+            <View style={styles.timelineContainer}>
+              {jobProgressSteps.map((step, index) => {
+                const isLast = index === jobProgressSteps.length - 1;
+                let color = '#CBD5E1'; // pending
+                let lineStyle = { backgroundColor: '#E2E8F0' }; // default gray line
 
-              if (step.status === 'completed') {
-                color = '#059669'; // Emerald
-                lineStyle = { backgroundColor: '#A7F3D0' };
-              } else if (step.status === 'active') {
-                color = '#2563EB'; // Blue
-                lineStyle = { backgroundColor: '#BFDBFE' }; // light blue line
-              }
+                if (step.status === 'completed') {
+                  color = '#059669'; // Emerald
+                  lineStyle = { backgroundColor: '#A7F3D0' };
+                } else if (step.status === 'active') {
+                  color = '#2563EB'; // Blue
+                  lineStyle = { backgroundColor: '#BFDBFE' }; // light blue line
+                }
 
-              return (
-                <View key={step.id} style={styles.timelineRow}>
-                  <View style={styles.timelineIconCol}>
-                    <View style={[styles.timelineCircle, { borderColor: color }]}>
-                      {step.status !== 'pending' && (
-                        <View style={[styles.timelineDot, { backgroundColor: color }]} />
+                return (
+                  <View key={step.id} style={styles.timelineRow}>
+                    <View style={styles.timelineIconCol}>
+                      <View style={[styles.timelineCircle, { borderColor: color }]}>
+                        {step.status !== 'pending' && (
+                          <View style={[styles.timelineDot, { backgroundColor: color }]} />
+                        )}
+                      </View>
+                      {!isLast && (
+                        <View style={[styles.timelineLine, lineStyle]} />
                       )}
                     </View>
-                    {!isLast && (
-                      <View style={[styles.timelineLine, lineStyle]} />
-                    )}
+                    <View style={[styles.timelineTextCol, isLast && { paddingBottom: 0 }]}>
+                      <Text style={styles.timelineTitle}>{step.title}</Text>
+                      <Text style={styles.timelineDesc}>{step.desc}</Text>
+                    </View>
                   </View>
-                  <View style={[styles.timelineTextCol, isLast && { paddingBottom: 0 }]}>
-                    <Text style={styles.timelineTitle}>{step.title}</Text>
-                    <Text style={styles.timelineDesc}>{step.desc}</Text>
+                );
+              })}
+            </View>
+          </View>
+          {/* 2. Selected Services */}
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeaderBetween}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <FileText size={16} color={colors.primary} style={{ marginRight: 6 }} />
+                <Text style={styles.sectionTitle}>Selected Services</Text>
+              </View>
+              {!isReadyForDelivery && (
+                <TouchableOpacity
+                  style={styles.editSectionBtn}
+                  activeOpacity={0.7}
+                  onPress={() =>
+                    navigation?.navigate('EditSelectedServicesScreen', {
+                      card: { ...card, selectedServices: services },
+                      onSaveServices: (newServices) => {
+                        setServicesList(newServices);
+                        setAdditionalWorkList(prevAddl =>
+                          prevAddl.map(item => {
+                            const match = newServices.find(s => s.id === item.id);
+                            return match ? { ...item, status: match.status } : item;
+                          })
+                        );
+                        fetchJobCardDetail();
+                      },
+                    })
+                  }
+                >
+                  <Pencil size={12} color={colors.primary} style={{ marginRight: 4 }} />
+                  <Text style={styles.editSectionBtnText}>Edit Status</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Table Header */}
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableHeadText, { flex: 2 }]}>Service Description</Text>
+              <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'center' }]}>Qty</Text>
+              <Text style={[styles.tableHeadText, { flex: 1.5, textAlign: 'center' }]}>Status</Text>
+              <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'right' }]}>Rate</Text>
+            </View>
+
+            {services.map((item, idx) => {
+              const stBadge = getStatusBadgeConfig(item.status);
+              return (
+                <View
+                  key={item.id || idx}
+                  style={[
+                    styles.tableRow,
+                    idx === services.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                >
+                  <Text style={[styles.tableCellText, { flex: 2 }]}>{item.name}</Text>
+                  <Text style={[styles.tableCellMuted, { flex: 1, textAlign: 'center' }]}>
+                    {item.qty || 'x1'}
+                  </Text>
+                  <View style={{ flex: 1.5, alignItems: 'center' }}>
+                    <View
+                      style={[
+                        styles.statusPillSmall,
+                        {
+                          backgroundColor: stBadge.bg,
+                          borderColor: stBadge.border,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.smallDot,
+                          { backgroundColor: stBadge.dot },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.statusPillTextSmall,
+                          { color: stBadge.text },
+                        ]}
+                      >
+                        {formatStatusLabel(item.status)}
+                      </Text>
+                    </View>
                   </View>
+                  <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
+                    {item.rate}
+                  </RupeeFormatText>
                 </View>
               );
             })}
           </View>
-        </View>
-        {/* 2. Selected Services */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderBetween}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <FileText size={16} color={colors.primary} style={{ marginRight: 6 }} />
-              <Text style={styles.sectionTitle}>Selected Services</Text>
-            </View>
-            {!isReadyForDelivery && (
-              <TouchableOpacity
-                style={styles.editSectionBtn}
-                activeOpacity={0.7}
-                onPress={() =>
-                  navigation?.navigate('EditSelectedServicesScreen', {
-                    card: { ...card, selectedServices: services },
-                    onSaveServices: (newServices) => {
-                      setServicesList(newServices);
-                      setAdditionalWorkList(prevAddl =>
-                        prevAddl.map(item => {
-                          const match = newServices.find(s => s.id === item.id);
-                          return match ? { ...item, status: match.status } : item;
-                        })
-                      );
-                      fetchJobCardDetail();
-                    },
-                  })
-                }
-              >
-                <Pencil size={12} color={colors.primary} style={{ marginRight: 4 }} />
-                <Text style={styles.editSectionBtnText}>Edit Status</Text>
-              </TouchableOpacity>
-            )}
-          </View>
 
-          {/* Table Header */}
-          <View style={styles.tableHeader}>
-            <Text style={[styles.tableHeadText, { flex: 2 }]}>Service Description</Text>
-            <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'center' }]}>Qty</Text>
-            <Text style={[styles.tableHeadText, { flex: 1.5, textAlign: 'center' }]}>Status</Text>
-            <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'right' }]}>Rate</Text>
-          </View>
-
-          {services.map((item, idx) => {
-            const stBadge = getStatusBadgeConfig(item.status);
-            return (
-              <View
-                key={item.id || idx}
-                style={[
-                  styles.tableRow,
-                  idx === services.length - 1 && { borderBottomWidth: 0 },
-                ]}
-              >
-                <Text style={[styles.tableCellText, { flex: 2 }]}>{item.name}</Text>
-                <Text style={[styles.tableCellMuted, { flex: 1, textAlign: 'center' }]}>
-                  {item.qty || 'x1'}
-                </Text>
-                <View style={{ flex: 1.5, alignItems: 'center' }}>
-                  <View
-                    style={[
-                      styles.statusPillSmall,
-                      {
-                        backgroundColor: stBadge.bg,
-                        borderColor: stBadge.border,
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.smallDot,
-                        { backgroundColor: stBadge.dot },
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.statusPillTextSmall,
-                        { color: stBadge.text },
-                      ]}
-                    >
-                      {item.status}
-                    </Text>
-                  </View>
-                </View>
-                <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
-                  {item.rate}
-                </RupeeFormatText>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* 3. Additional Work & Services (Only displayed when additional work exists) */}
-        {additionalWork && additionalWork.length > 0 && (
+          {/* 3. Additional Work & Services (Always displayed so user can add additional work anytime) */}
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderBetween}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -756,259 +774,299 @@ export function FloorJobCardViewScreen({ route, navigation }) {
                   }
                 >
                   <Pencil size={12} color="#059669" style={{ marginRight: 4 }} />
-                  <Text style={[styles.editSectionBtnText, { color: '#059669' }]}>Edit / Add</Text>
+                  <Text style={[styles.editSectionBtnText, { color: '#059669' }]}>
+                    {additionalWork && additionalWork.length > 0 ? 'Edit / Add' : '+ Add Work'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
 
-            {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <Text style={[styles.tableHeadText, { flex: 2.5 }]}>Service Description</Text>
-              <Text style={[styles.tableHeadText, { flex: 1.5, textAlign: 'center' }]}>Status</Text>
-              <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'right' }]}>Rate</Text>
-            </View>
+            {additionalWork && additionalWork.length > 0 ? (
+              <>
+                {/* Table Header */}
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tableHeadText, { flex: 2.5 }]}>Service Description</Text>
+                  <Text style={[styles.tableHeadText, { flex: 1.5, textAlign: 'center' }]}>Status</Text>
+                  <Text style={[styles.tableHeadText, { flex: 1, textAlign: 'right' }]}>Rate</Text>
+                </View>
 
-            {additionalWork.map((item, idx) => {
-              const stBadge = getStatusBadgeConfig(item.status);
-              return (
-                <View
-                  key={item.id || idx}
-                  style={[
-                    styles.tableRow,
-                    idx === additionalWork.length - 1 && { borderBottomWidth: 0 },
-                  ]}
-                >
-                  <Text style={[styles.tableCellText, { flex: 2.5 }]}>{item.name}</Text>
-                  <View style={{ flex: 1.5, alignItems: 'center' }}>
+                {additionalWork.map((item, idx) => {
+                  const stBadge = getStatusBadgeConfig(item.status);
+                  return (
                     <View
+                      key={item.id || idx}
                       style={[
-                        styles.statusPillSmall,
-                        {
-                          backgroundColor: stBadge.bg,
-                          borderColor: stBadge.border,
-                          borderWidth: 1,
-                        },
+                        styles.tableRow,
+                        idx === additionalWork.length - 1 && { borderBottomWidth: 0 },
                       ]}
                     >
-                      <View style={[styles.smallDot, { backgroundColor: stBadge.dot }]} />
-                      <Text
-                        style={[
-                          styles.statusPillTextSmall,
-                          { color: stBadge.text },
-                        ]}
-                      >
-                        {item.status || 'Pending'}
-                      </Text>
+                      <Text style={[styles.tableCellText, { flex: 2.5 }]}>{item.name}</Text>
+                      <View style={{ flex: 1.5, alignItems: 'center' }}>
+                        <View
+                          style={[
+                            styles.statusPillSmall,
+                            {
+                              backgroundColor: stBadge.bg,
+                              borderColor: stBadge.border,
+                              borderWidth: 1,
+                            },
+                          ]}
+                        >
+                          <View style={[styles.smallDot, { backgroundColor: stBadge.dot }]} />
+                          <Text
+                            style={[
+                              styles.statusPillTextSmall,
+                              { color: stBadge.text },
+                            ]}
+                          >
+                            {formatStatusLabel(item.status)}
+                          </Text>
+                        </View>
+                      </View>
+                      <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
+                        {item.rate}
+                      </RupeeFormatText>
                     </View>
+                  );
+                })}
+              </>
+            ) : (
+              <View style={{ paddingVertical: 14, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 12.5, fontFamily: fonts.inter, color: '#94A3B8' }}>
+                  No additional work requested yet.
+                </Text>
+                {!isReadyForDelivery && (
+                  <TouchableOpacity
+                    style={[styles.editSectionBtn, { marginTop: 10, paddingHorizontal: 14, paddingVertical: 6 }]}
+                    activeOpacity={0.7}
+                    onPress={() =>
+                      navigation?.navigate('AddAdditionalWorkScreen', {
+                        card: { ...card, currentServices: services },
+                        department: route?.params?.department || null,
+                        activeTab: route?.params?.activeTab || null,
+                        onSaveAdditionalWork: (newItems) => {
+                          setAdditionalWorkList(prev => [...prev, ...newItems]);
+                          setServicesList(prev => {
+                            const existingIds = new Set(prev.map(p => p.id));
+                            const toAdd = newItems.filter(item => !existingIds.has(item.id)).map(item => ({
+                              ...item,
+                              qty: item.qty || 'x1',
+                            }));
+                            return [...prev, ...toAdd];
+                          });
+                          fetchJobCardDetail();
+                        },
+                      })
+                    }
+                  >
+                    <PlusCircle size={13} color="#059669" style={{ marginRight: 5 }} />
+                    <Text style={[styles.editSectionBtnText, { color: '#059669' }]}>+ Add Additional Work</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeaderBetween}>
+              <Text style={styles.sectionTitle}>Estimate Summary</Text>
+              <View style={[styles.statusPillSmall, styles.statusPillIndigo]}>
+                <View style={[styles.smallDot, { backgroundColor: '#4F46E5' }]} />
+                <Text style={[styles.statusPillTextSmall, { color: '#4F46E5' }]}>
+                  {card.status || 'Mechanical In Progress'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Base Subtotal</Text>
+              <RupeeFormatText style={styles.summaryVal}>{estimate.baseSubtotal}</RupeeFormatText>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Additional Work</Text>
+              <RupeeFormatText style={styles.summaryVal}>{estimate.additionalWork}</RupeeFormatText>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Tax (10%)</Text>
+              <RupeeFormatText style={styles.summaryVal}>{estimate.tax}</RupeeFormatText>
+            </View>
+
+            <View style={styles.summaryDivider} />
+
+            <View style={styles.summaryTotalRow}>
+              <Text style={styles.grandTotalLabel}>Grand Total</Text>
+              <RupeeFormatText style={styles.grandTotalVal}>{estimate.grandTotal}</RupeeFormatText>
+            </View>
+          </View>
+          {/* 3.5 Additional Work Messages & Voice Notes */}
+          {card.approvals && card.approvals.filter(a => a.explanation || a.voiceNoteUrl).length > 0 && (
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeaderRow}>
+                <Mic size={16} color="#0D9488" style={{ marginRight: 6 }} />
+                <Text style={styles.sectionTitle}>Additional Work Messages & Voice Notes</Text>
+              </View>
+
+              {card.approvals.filter(a => a.explanation || a.voiceNoteUrl).map((approval, idx) => {
+                const itemId = approval.id || String(idx);
+                const isExpanded = expandedApprovalId === 'INIT' ? idx === 0 : expandedApprovalId === itemId;
+
+                return (
+                  <View key={itemId} style={[styles.voiceNoteCard, { marginBottom: 12 }]}>
+                    <TouchableOpacity
+                      style={[styles.voiceNoteHeader, !isExpanded && { marginBottom: 0 }]}
+                      activeOpacity={0.7}
+                      onPress={() => setExpandedApprovalId(isExpanded ? null : itemId)}
+                    >
+                      <View>
+                        <Text style={styles.approvalReqText}>APPROVAL REQUEST: {approval.approvalCode}</Text>
+                        <Text style={styles.voiceNoteDate}>{approval.createdAt}</Text>
+                      </View>
+                      <View>
+                        {isExpanded ? <ChevronUp size={18} color="#64748B" /> : <ChevronDown size={18} color="#64748B" />}
+                      </View>
+                    </TouchableOpacity>
+
+                    {isExpanded && (
+                      <View>
+                        {approval.explanation ? (
+                          <>
+                            <Text style={styles.voiceNoteLabel}>Explanation / Message</Text>
+                            <View style={styles.voiceNoteMsgBox}>
+                              <Text style={styles.voiceNoteMsgText}>{approval.explanation}</Text>
+                            </View>
+                          </>
+                        ) : null}
+
+                        {approval.voiceNoteUrl ? (
+                          <View style={styles.audioPlayerBox}>
+                            <View style={styles.audioPlayerHeader}>
+                              <Mic size={12} color="#059669" style={{ marginRight: 4 }} />
+                              <Text style={styles.audioPlayerTitle}>Recorded Voice Note Audio:</Text>
+                            </View>
+
+                            <View style={styles.audioControlsRow}>
+                              <TouchableOpacity
+                                style={styles.playBtn}
+                                onPress={() => {
+                                  const isThisPlaying = playingId === itemId;
+                                  if (isThisPlaying) {
+                                    onPausePlay();
+                                  } else {
+                                    onStartPlay(approval.voiceNoteUrl, itemId);
+                                  }
+                                }}
+                              >
+                                {playingId === itemId ? (
+                                  <Pause size={16} color="#0F172A" fill="#0F172A" />
+                                ) : (
+                                  <Play size={16} color="#0F172A" fill="#0F172A" />
+                                )}
+                              </TouchableOpacity>
+                              <Text style={styles.audioTimeText}>
+                                {playingId === itemId ? `${playTime} / ${duration}` : '00:00 / 00:00'}
+                              </Text>
+
+                              <View style={styles.progressBarBg}>
+                                <View style={[styles.progressBarFill, { width: playingId === itemId ? playProgress : '0%' }]} />
+                              </View>
+
+                              <TouchableOpacity onPress={toggleMute} style={{ marginLeft: 8, padding: 4 }}>
+                                {isMuted ? (
+                                  <VolumeX size={16} color="#0F172A" />
+                                ) : (
+                                  <Volume2 size={16} color="#0F172A" />
+                                )}
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={() => handleDownload(approval.voiceNoteUrl, approval.approvalCode)} style={{ marginLeft: 4, padding: 4 }}>
+                                <MoreVertical size={16} color="#0F172A" />
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        ) : null}
+                      </View>
+                    )}
                   </View>
-                  <RupeeFormatText style={[styles.tableCellBold, { flex: 1, textAlign: 'right' }]}>
-                    {item.rate}
-                  </RupeeFormatText>
+                )
+              })}
+            </View>
+          )}
+
+          {/* 4. Estimate Summary */}
+
+
+          {/* 5. Assigned Mechanical Work (Accordion inside item box) */}
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeaderBetween}>
+              <Text style={styles.sectionTitle}>Assigned Mechanical Work</Text>
+              <View style={styles.assignmentCountBadge}>
+                <Text style={styles.assignmentCountText}>
+                  {assignedWork.length} Assignment
+                </Text>
+              </View>
+            </View>
+
+            {assignedWork.map((work, idx) => {
+              const itemId = work.id || String(idx);
+              const isItemExpanded = expandedWorkId === itemId;
+
+              return (
+                <View key={itemId} style={styles.assignedWorkBox}>
+                  <TouchableOpacity
+                    style={[
+                      styles.workTopRow,
+                      { marginBottom: isItemExpanded ? 10 : 0 },
+                    ]}
+                    activeOpacity={0.7}
+                    onPress={() => setExpandedWorkId(isItemExpanded ? null : itemId)}
+                  >
+                    <View style={styles.workUserCircle}>
+                      <User size={14} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={styles.workTitle}>{work.serviceName}</Text>
+                      <Text style={styles.workEmpText}>{work.empName}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={[styles.statusPillSmall, { backgroundColor: getStatusBadgeConfig(work.status).bg, borderColor: getStatusBadgeConfig(work.status).border }]}>
+                        <View style={[styles.smallDot, { backgroundColor: getStatusBadgeConfig(work.status).dot }]} />
+                        <Text style={[styles.statusPillTextSmall, { color: getStatusBadgeConfig(work.status).text }]}>
+                          {work.status}
+                        </Text>
+                      </View>
+                      {isItemExpanded ? (
+                        <ChevronUp size={16} color="#64748B" />
+                      ) : (
+                        <ChevronDown size={16} color="#64748B" />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Collapsible Time Tracking Container */}
+                  {isItemExpanded && (
+                    <View style={styles.timeTrackContainer}>
+                      <View style={styles.timeTrackCol}>
+                        <Text style={styles.timeTrackLabel}>START TIME</Text>
+                        <View style={styles.iconValRow}>
+                          <Clock size={12} color="#0D9488" />
+                          <Text style={styles.timeTrackValTeal}>{work.startTime}</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.timeTrackCol}>
+                        <Text style={styles.timeTrackLabel}>END TIME</Text>
+                        <View style={styles.iconValRow}>
+                          <Clock size={12} color="#94A3B8" />
+                          <Text style={styles.timeTrackValMuted}>{work.endTime}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  )}
                 </View>
               );
             })}
           </View>
-        )}
-
-        {/* 3.5 Additional Work Messages & Voice Notes */}
-        {card.approvals && card.approvals.filter(a => a.explanation || a.voiceNoteUrl).length > 0 && (
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeaderRow}>
-              <Mic size={16} color="#0D9488" style={{ marginRight: 6 }} />
-              <Text style={styles.sectionTitle}>Additional Work Messages & Voice Notes</Text>
-            </View>
-
-            {card.approvals.filter(a => a.explanation || a.voiceNoteUrl).map((approval, idx) => {
-              const itemId = approval.id || String(idx);
-              const isExpanded = expandedApprovalId === 'INIT' ? idx === 0 : expandedApprovalId === itemId;
-              
-              return (
-              <View key={itemId} style={[styles.voiceNoteCard, { marginBottom: 12 }]}>
-                <TouchableOpacity 
-                  style={[styles.voiceNoteHeader, !isExpanded && { marginBottom: 0 }]}
-                  activeOpacity={0.7}
-                  onPress={() => setExpandedApprovalId(isExpanded ? null : itemId)}
-                >
-                  <View>
-                    <Text style={styles.approvalReqText}>APPROVAL REQUEST: {approval.approvalCode}</Text>
-                    <Text style={styles.voiceNoteDate}>{approval.createdAt}</Text>
-                  </View>
-                  <View>
-                    {isExpanded ? <ChevronUp size={18} color="#64748B" /> : <ChevronDown size={18} color="#64748B" />}
-                  </View>
-                </TouchableOpacity>
-
-                {isExpanded && (
-                  <View>
-                    {approval.explanation ? (
-                      <>
-                        <Text style={styles.voiceNoteLabel}>Explanation / Message</Text>
-                        <View style={styles.voiceNoteMsgBox}>
-                          <Text style={styles.voiceNoteMsgText}>{approval.explanation}</Text>
-                        </View>
-                      </>
-                    ) : null}
-
-                    {approval.voiceNoteUrl ? (
-                      <View style={styles.audioPlayerBox}>
-                        <View style={styles.audioPlayerHeader}>
-                          <Mic size={12} color="#059669" style={{ marginRight: 4 }} />
-                          <Text style={styles.audioPlayerTitle}>Recorded Voice Note Audio:</Text>
-                        </View>
-
-                        <View style={styles.audioControlsRow}>
-                          <TouchableOpacity
-                            style={styles.playBtn}
-                            onPress={() => {
-                              const isThisPlaying = playingId === itemId;
-                              if (isThisPlaying) {
-                                onPausePlay();
-                              } else {
-                                onStartPlay(approval.voiceNoteUrl, itemId);
-                              }
-                            }}
-                          >
-                            {playingId === itemId ? (
-                              <Pause size={16} color="#0F172A" fill="#0F172A" />
-                            ) : (
-                              <Play size={16} color="#0F172A" fill="#0F172A" />
-                            )}
-                          </TouchableOpacity>
-                          <Text style={styles.audioTimeText}>
-                            {playingId === itemId ? `${playTime} / ${duration}` : '00:00 / 00:00'}
-                          </Text>
-
-                          <View style={styles.progressBarBg}>
-                            <View style={[styles.progressBarFill, { width: playingId === itemId ? playProgress : '0%' }]} />
-                          </View>
-
-                          <TouchableOpacity onPress={toggleMute} style={{ marginLeft: 8, padding: 4 }}>
-                            {isMuted ? (
-                              <VolumeX size={16} color="#0F172A" />
-                            ) : (
-                              <Volume2 size={16} color="#0F172A" />
-                            )}
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => handleDownload(approval.voiceNoteUrl, approval.approvalCode)} style={{ marginLeft: 4, padding: 4 }}>
-                            <MoreVertical size={16} color="#0F172A" />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ) : null}
-                  </View>
-                )}
-              </View>
-            )})}
-          </View>
-        )}
-
-        {/* 4. Estimate Summary */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderBetween}>
-            <Text style={styles.sectionTitle}>Estimate Summary</Text>
-            <View style={[styles.statusPillSmall, styles.statusPillIndigo]}>
-              <View style={[styles.smallDot, { backgroundColor: '#4F46E5' }]} />
-              <Text style={[styles.statusPillTextSmall, { color: '#4F46E5' }]}>
-                {card.status || 'Mechanical In Progress'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Base Subtotal</Text>
-            <RupeeFormatText style={styles.summaryVal}>{estimate.baseSubtotal}</RupeeFormatText>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Additional Work</Text>
-            <RupeeFormatText style={styles.summaryVal}>{estimate.additionalWork}</RupeeFormatText>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Tax (10%)</Text>
-            <RupeeFormatText style={styles.summaryVal}>{estimate.tax}</RupeeFormatText>
-          </View>
-
-          <View style={styles.summaryDivider} />
-
-          <View style={styles.summaryTotalRow}>
-            <Text style={styles.grandTotalLabel}>Grand Total</Text>
-            <RupeeFormatText style={styles.grandTotalVal}>{estimate.grandTotal}</RupeeFormatText>
-          </View>
-        </View>
-
-        {/* 5. Assigned Mechanical Work (Accordion inside item box) */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeaderBetween}>
-            <Text style={styles.sectionTitle}>Assigned Mechanical Work</Text>
-            <View style={styles.assignmentCountBadge}>
-              <Text style={styles.assignmentCountText}>
-                {assignedWork.length} Assignment
-              </Text>
-            </View>
-          </View>
-
-          {assignedWork.map((work, idx) => {
-            const itemId = work.id || String(idx);
-            const isItemExpanded = expandedWorkId === itemId;
-
-            return (
-              <View key={itemId} style={styles.assignedWorkBox}>
-                <TouchableOpacity
-                  style={[
-                    styles.workTopRow,
-                    { marginBottom: isItemExpanded ? 10 : 0 },
-                  ]}
-                  activeOpacity={0.7}
-                  onPress={() => setExpandedWorkId(isItemExpanded ? null : itemId)}
-                >
-                  <View style={styles.workUserCircle}>
-                    <User size={14} color={colors.primary} />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={styles.workTitle}>{work.serviceName}</Text>
-                    <Text style={styles.workEmpText}>{work.empName}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={[styles.statusPillSmall, { backgroundColor: getStatusBadgeConfig(work.status).bg, borderColor: getStatusBadgeConfig(work.status).border }]}>
-                      <View style={[styles.smallDot, { backgroundColor: getStatusBadgeConfig(work.status).dot }]} />
-                      <Text style={[styles.statusPillTextSmall, { color: getStatusBadgeConfig(work.status).text }]}>
-                        {work.status}
-                      </Text>
-                    </View>
-                    {isItemExpanded ? (
-                      <ChevronUp size={16} color="#64748B" />
-                    ) : (
-                      <ChevronDown size={16} color="#64748B" />
-                    )}
-                  </View>
-                </TouchableOpacity>
-
-                {/* Collapsible Time Tracking Container */}
-                {isItemExpanded && (
-                  <View style={styles.timeTrackContainer}>
-                    <View style={styles.timeTrackCol}>
-                      <Text style={styles.timeTrackLabel}>START TIME</Text>
-                      <View style={styles.iconValRow}>
-                        <Clock size={12} color="#0D9488" />
-                        <Text style={styles.timeTrackValTeal}>{work.startTime}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.timeTrackCol}>
-                      <Text style={styles.timeTrackLabel}>END TIME</Text>
-                      <View style={styles.iconValRow}>
-                        <Clock size={12} color="#94A3B8" />
-                        <Text style={styles.timeTrackValMuted}>{work.endTime}</Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
-      </ScrollView>
+        </ScrollView>
       )}
     </View>
   );

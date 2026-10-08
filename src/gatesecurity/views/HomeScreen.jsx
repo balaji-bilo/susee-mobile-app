@@ -59,6 +59,7 @@ export default function HomeScreen({ navigation }) {
 
   const [refreshing, setRefreshing] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const isAndroid15Plus = Platform.OS === 'android' && Number(Platform.Version) >= 35;
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -77,7 +78,7 @@ export default function HomeScreen({ navigation }) {
     };
   }, []);
 
-  const handleInputFocus = () => {
+  const handleRemarksFocus = () => {
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 150);
@@ -214,14 +215,19 @@ export default function HomeScreen({ navigation }) {
 
   const handleSubmitEntry = async () => {
     setWhatsappNumberError('');
-    const trimmedPhone = whatsappNumber.trim();
+    const trimmedPhone = (whatsappNumber || '').trim();
     if (!trimmedPhone) {
       setWhatsappNumberError('WhatsApp number is required');
       return;
     }
 
-    if (/^[0-5]/.test(trimmedPhone)) {
-      setWhatsappNumberError('Invalid phone number');
+    if (!/^[6-9]\d{9}$/.test(trimmedPhone)) {
+      setWhatsappNumberError('Enter a valid 10-digit mobile number starting with 6-9');
+      return;
+    }
+
+    if (!verifiedVehicle) {
+      showToast('Please search and verify vehicle number first');
       return;
     }
 
@@ -230,9 +236,9 @@ export default function HomeScreen({ navigation }) {
       const token = await retrieveEncryptedData('token');
       const response = await axios.post(`${base_url}${submit_entry}`, {
         registrationNumber: verifiedVehicle,
-        whatsappNumber: whatsappNumber.trim(),
-        entryType: entryType.toLowerCase(),
-        remarks: remarks.trim(),
+        whatsappNumber: trimmedPhone,
+        entryType: (entryType || 'service').toLowerCase(),
+        remarks: (remarks || '').trim(),
       }, {
         headers: {
           'Content-Type': 'application/json',
@@ -242,21 +248,22 @@ export default function HomeScreen({ navigation }) {
 
       if (response.status === 200 || response.status === 201 || response.data?.success) {
         showToast(`Entry registered successfully for vehicle ${verifiedVehicle}`);
+        setSearchVehicle('');
+        setVerifiedVehicle('');
+        setWhatsappNumber('');
+        setRemarks('');
+        setFormVisible(false);
+        setNextAction('CREATE_ENTRY');
       } else {
         showToast(response.data?.message || 'Failed to submit entry.');
       }
     } catch (error) {
-      showToast('Failed to submit entry.');
-      console.error('Submit Entry API error:', error);
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to submit entry.';
+      showToast(errorMsg);
+      console.error('Submit Entry API error:', error?.response?.data || error);
     } finally {
       setLoading(false);
     }
-
-    setSearchVehicle('');
-    setVerifiedVehicle('');
-    setWhatsappNumber('');
-    setFormVisible(false);
-    setNextAction('CREATE_ENTRY');
   };
 
   const executeExitApi = async () => {
@@ -278,23 +285,24 @@ export default function HomeScreen({ navigation }) {
 
       if (response.status === 200 || response.status === 201 || response.data?.success) {
         showToast(`Exit registered successfully for vehicle ${verifiedVehicle}`);
+        setSearchVehicle('');
+        setVerifiedVehicle('');
+        setWhatsappNumber('');
+        setRemarks('');
+        setFormVisible(false);
+        setActiveGateEntry(null);
+        setNextAction('CREATE_ENTRY');
       } else {
         showToast(response.data?.message || 'Failed to submit exit.');
       }
     } catch (error) {
-      showToast('Failed to submit exit.');
-      console.error('Submit Exit API error:', error);
+      const errorMsg = error?.response?.data?.message || error?.message || 'Failed to submit exit.';
+      showToast(errorMsg);
+      console.error('Submit Exit API error:', error?.response?.data || error);
     } finally {
       setLoading(false);
       setExitModalVisible(false);
     }
-
-    setSearchVehicle('');
-    setVerifiedVehicle('');
-    setWhatsappNumber('');
-    setFormVisible(false);
-    setActiveGateEntry(null);
-    setNextAction('CREATE_ENTRY');
   };
 
   const handleSubmitExit = () => {
@@ -321,7 +329,7 @@ export default function HomeScreen({ navigation }) {
             s.scroll,
             {
               flexGrow: 1,
-              paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 140,
+              paddingBottom: (isAndroid15Plus || Platform.OS === 'ios') && keyboardHeight > 0 ? keyboardHeight + 80 : 140,
             },
           ]}
           showsVerticalScrollIndicator={false}
@@ -456,7 +464,6 @@ export default function HomeScreen({ navigation }) {
                         setWhatsappNumber(text);
                         setWhatsappNumberError('');
                       }}
-                      onFocus={handleInputFocus}
                       placeholder="Enter WhatsApp number"
                       placeholderTextColor={COLORS.muted}
                       keyboardType="phone-pad"
@@ -489,7 +496,7 @@ export default function HomeScreen({ navigation }) {
                       style={s.textInputStyle}
                       value={remarks}
                       onChangeText={setRemarks}
-                      onFocus={handleInputFocus}
+                      onFocus={handleRemarksFocus}
                       placeholder="Any specific comments"
                       placeholderTextColor={COLORS.muted}
                     />

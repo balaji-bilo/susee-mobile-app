@@ -36,7 +36,8 @@
     "react-native-signature-canvas": "^5.1.0",
     "react-native-simple-toast": "^3.3.2",
     "react-native-svg": "^15.15.5",
-    "react-native-webview": "^14.0.1"
+    "react-native-webview": "^14.0.1",
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

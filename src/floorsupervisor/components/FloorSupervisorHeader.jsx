@@ -1,16 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Bell } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import Toast from 'react-native-simple-toast';
+import axios from 'axios';
 import { fonts, colors } from '../../common/config/theme';
 import { retrieveEncryptedData } from '../../common/config/storage';
+import { base_url, notification_count } from '../../common/config/constant';
 
 export function FloorSupervisorHeader({ title, subtitle: propSubtitle, navigation: propNavigation }) {
   const hookNavigation = useNavigation();
   const navigation = propNavigation || hookNavigation;
   const [dynamicSubtitle, setDynamicSubtitle] = useState(propSubtitle || '');
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const token = await retrieveEncryptedData('token');
+      if (!token) return;
+
+      const response = await axios.get(`${base_url}${notification_count}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data && response.data.success && response.data.data) {
+        const count = response.data.data.count ?? 0;
+        setUnreadCount(Number(count) || 0);
+      }
+    } catch (err) {
+      console.warn('Error fetching unread notification count in header:', err?.message);
+    }
+  }, []);
 
   useEffect(() => {
     async function fetchRole() {
@@ -30,7 +51,15 @@ export function FloorSupervisorHeader({ title, subtitle: propSubtitle, navigatio
       }
     }
     fetchRole();
-  }, []);
+    fetchUnreadCount();
+
+    if (navigation && typeof navigation.addListener === 'function') {
+      const unsubscribe = navigation.addListener('focus', () => {
+        fetchUnreadCount();
+      });
+      return unsubscribe;
+    }
+  }, [navigation, fetchUnreadCount]);
 
   const insets = useSafeAreaInsets();
   const safeTop = insets.top > 0 ? insets.top : (Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0);
@@ -51,14 +80,20 @@ export function FloorSupervisorHeader({ title, subtitle: propSubtitle, navigatio
         {dynamicSubtitle ? <Text style={styles.screenSubtitle}>{dynamicSubtitle}</Text> : null}
       </View>
 
-      {/* Notification Bell Icon */}
+      {/* Notification Bell Icon with Live Badge */}
       <TouchableOpacity
         style={styles.notifBtn}
         activeOpacity={0.7}
         onPress={handleNotificationPress}
       >
         <Bell size={19} color="#0F172A" />
-        <View style={styles.notifBadgeDot} />
+        {unreadCount > 0 && (
+          <View style={styles.badgeContainer}>
+            <Text style={styles.badgeText}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
     </View>
   );
@@ -101,15 +136,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     position: 'relative',
   },
-  notifBadgeDot: {
+  badgeContainer: {
     position: 'absolute',
-    top: 8,
-    right: 9,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: '#EF4444',
-    borderWidth: 1.2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
     borderColor: '#FFFFFF',
+    elevation: 3,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontFamily: fonts.inter,
+    fontWeight: '700',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
 });
+

@@ -14,9 +14,9 @@ export function SummaryCard({ title, rows, accent = colors.primary }) {
       }}
     >
       <Text style={{ fontFamily: fonts.inter, fontSize: 14, color: accent, marginBottom: spacing.md }}>{title}</Text>
-      {rows.map((row) => (
+      {rows.map((row, index) => (
         <View
-          key={row.label}
+          key={`${row.label}-${index}`}
           style={{
             flexDirection: 'row',
             justifyContent: 'space-between',

@@ -80,20 +80,56 @@ const STATUS_OPTIONS = [
   },
 ];
 
-function getStatusStyle(statusName) {
-  const found = STATUS_OPTIONS.find(
-    opt => opt.value.toLowerCase() === (statusName || '').toLowerCase()
+export function formatStatusLabel(status) {
+  if (!status) return 'Pending';
+  const norm = String(status).trim().toLowerCase().replace(/[\s_]+/g, '');
+  if (norm === 'inprogress' || norm === 'ongoing') return 'In Progress';
+  if (norm === 'completed' || norm === 'done') return 'Completed';
+  if (norm === 'pending') return 'Pending';
+  if (norm === 'assigned') return 'Assigned';
+  if (norm === 'rejected' || norm === 'cancelled') return 'Rejected';
+  if (norm === 'postponed') return 'Postponed';
+
+  return String(status)
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function getStatusStyle(statusName, dynamicList = []) {
+  const norm = String(statusName || '').trim().toLowerCase().replace(/[\s_]+/g, '');
+  
+  if (norm.includes('completed') || norm === 'done') {
+    return STATUS_OPTIONS.find(o => o.value === 'Completed');
+  }
+  if (norm.includes('inprogress') || norm.includes('ongoing')) {
+    return STATUS_OPTIONS.find(o => o.value === 'In Progress');
+  }
+  if (norm.includes('assigned')) {
+    return STATUS_OPTIONS.find(o => o.value === 'Assigned');
+  }
+  if (norm.includes('rejected') || norm.includes('cancelled')) {
+    return STATUS_OPTIONS.find(o => o.value === 'Rejected');
+  }
+  if (norm.includes('postponed')) {
+    return STATUS_OPTIONS.find(o => o.value === 'Postponed');
+  }
+
+  const listToSearch = dynamicList && dynamicList.length > 0 ? [...dynamicList, ...STATUS_OPTIONS] : STATUS_OPTIONS;
+  const found = listToSearch.find(
+    opt => (opt.value || '').toLowerCase().replace(/[\s_]+/g, '') === norm ||
+           (opt.label || '').toLowerCase().replace(/[\s_]+/g, '') === norm
   );
-  return (
-    found || {
-      label: statusName || 'Pending',
-      value: statusName || 'Pending',
-      bgColor: '#FFFBEB',
-      borderColor: '#FDE68A',
-      textColor: '#D97706',
-      dotColor: '#D97706',
-    }
-  );
+  if (found) return found;
+
+  return {
+    label: formatStatusLabel(statusName),
+    value: statusName || 'Pending',
+    bgColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    textColor: '#D97706',
+    dotColor: '#D97706',
+  };
 }
 
 export function EditSelectedServicesScreen({ route, navigation }) {
@@ -120,9 +156,9 @@ export function EditSelectedServicesScreen({ route, navigation }) {
         });
         if (response.data?.success && response.data?.data) {
           const apiStatuses = response.data.data.map(s => {
-            const defaultStyle = getStatusStyle(s.statusCode);
+            const defaultStyle = getStatusStyle(s.statusCode || s.statusName);
             return {
-              label: s.statusName,
+              label: s.statusName || formatStatusLabel(s.statusCode),
               value: s.statusCode,
               bgColor: defaultStyle.bgColor,
               borderColor: defaultStyle.borderColor,
@@ -290,6 +326,10 @@ export function EditSelectedServicesScreen({ route, navigation }) {
         <View style={styles.listContainer}>
           {servicesList.map((item, idx) => {
             const statusConfig = getStatusStyle(item.status);
+            const isCompleted =
+              String(item.status || '').toUpperCase().replace(/\s+/g, '_').includes('COMPLETED') ||
+              Boolean(item.isCompleted) ||
+              String(item.serviceStatusCode || '').toUpperCase().replace(/\s+/g, '_').includes('COMPLETED');
 
             return (
               <View key={item.id || idx} style={styles.serviceCard}>
@@ -311,8 +351,10 @@ export function EditSelectedServicesScreen({ route, navigation }) {
                         backgroundColor: statusConfig.bgColor,
                         borderColor: statusConfig.borderColor,
                       },
+                      isCompleted && styles.statusDropdownBtnDisabled,
                     ]}
-                    activeOpacity={0.8}
+                    activeOpacity={isCompleted ? 1 : 0.8}
+                    disabled={isCompleted}
                     onPress={() => setActiveItemIndex(idx)}
                   >
                     <View
@@ -327,9 +369,13 @@ export function EditSelectedServicesScreen({ route, navigation }) {
                         { color: statusConfig.textColor },
                       ]}
                     >
-                      {item.status}
+                      {statusConfig?.label || formatStatusLabel(item.status)}
                     </Text>
-                    <ChevronDown size={15} color={statusConfig.textColor} />
+                    {isCompleted ? (
+                      <Check size={14} color={statusConfig.textColor} />
+                    ) : (
+                      <ChevronDown size={15} color={statusConfig.textColor} />
+                    )}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -387,7 +433,8 @@ export function EditSelectedServicesScreen({ route, navigation }) {
             <View style={styles.optionsList}>
               {dynamicStatuses.map(opt => {
                 const isSelected =
-                  activeService?.status?.toLowerCase() === opt.value.toLowerCase();
+                  String(activeService?.status || '').toLowerCase().replace(/[\s_]+/g, '') ===
+                  String(opt.value || opt.label || '').toLowerCase().replace(/[\s_]+/g, '');
 
                 return (
                   <TouchableOpacity
@@ -421,7 +468,7 @@ export function EditSelectedServicesScreen({ route, navigation }) {
                             { color: opt.textColor },
                           ]}
                         >
-                          {opt.label}
+                          {opt.label || formatStatusLabel(opt.value)}
                         </Text>
                       </View>
                     </View>
@@ -604,6 +651,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     minWidth: 125,
     justifyContent: 'center',
+  },
+  statusDropdownBtnDisabled: {
+    opacity: 0.7,
   },
   statusDot: {
     width: 6,

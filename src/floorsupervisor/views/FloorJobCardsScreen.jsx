@@ -88,6 +88,7 @@ export function FloorJobCardsScreen({ navigation }) {
           return {
             id: item.jobCardNo,
             jobCardId: item.id,
+            statusCode: String(item.currentStatus?.statusCode || item.statusCode || '').toUpperCase(),
             vehicleNo: item.vehicle?.registrationNo || '',
             owner: item.customer?.fullName || '',
             initial: item.customer?.fullName?.[0] || 'U',
@@ -306,6 +307,54 @@ export function FloorJobCardsScreen({ navigation }) {
     }
   };
 
+  const isCardInTab = (card, tabKey) => {
+    const code = String(card.statusCode || '').toUpperCase();
+    const status = String(card.status || '').toUpperCase();
+
+    if (tabKey === 'ALL') {
+      return true;
+    }
+    if (tabKey === 'MECHANICAL') {
+      const hasMechanicalAssignment = (card.workAssignments || card.assignmentHistory || []).some((a) => {
+        const slug = a.service?.category?.slug?.toLowerCase() || a.service?.categorySlug?.toLowerCase() || '';
+        const name = a.service?.category?.name?.toLowerCase() || a.service?.category?.toLowerCase() || '';
+        return ['mechanical', 'mechanic', 'floor', 'general service', 'engine', 'electrical'].some((alias) => slug.includes(alias) || name.includes(alias));
+      });
+      return (
+        (code === 'MECHANICAL_ASSIGNED' ||
+        code === 'MECHANICAL_IN_PROGRESS' ||
+        status.includes('MECHANICAL ASSIGNED') ||
+        status.includes('MECHANICAL IN PROGRESS')) &&
+        hasMechanicalAssignment
+      );
+    }
+    if (tabKey === 'BODY_SHOP') {
+      const hasBodyShopAssignment = (card.workAssignments || card.assignmentHistory || []).some((a) => {
+        const slug = a.service?.category?.slug?.toLowerCase() || a.service?.categorySlug?.toLowerCase() || '';
+        const name = a.service?.category?.name?.toLowerCase() || a.service?.category?.toLowerCase() || '';
+        return ['body', 'paint', 'denting', 'tinkering', 'collision'].some((alias) => slug.includes(alias) || name.includes(alias));
+      });
+      return (
+        (code === 'BODY_SHOP_ASSIGNED' ||
+        code === 'BODY_SHOP_IN_PROGRESS' ||
+        status.includes('BODY SHOP ASSIGNED') ||
+        status.includes('BODY SHOP IN PROGRESS')) &&
+        hasBodyShopAssignment
+      );
+    }
+    if (tabKey === 'READY_FOR_DELIVERY') {
+      return (
+        code === 'READY_FOR_DELIVERY' ||
+        code === 'READY_FOR_DELIVERED' ||
+        code === 'DELIVERED' ||
+        code === 'VEHICLE_DELIVERED' ||
+        status.includes('READY') ||
+        status.includes('DELIVER')
+      );
+    }
+    return false;
+  };
+
   const getDeptAssignment = (assignments, deptAliases) => {
     if (!assignments || !Array.isArray(assignments)) return { mechanic: null, bay: null };
     const deptAssignments = assignments.filter(a => {
@@ -322,29 +371,7 @@ export function FloorJobCardsScreen({ navigation }) {
   };
 
   const getTabCount = (key) => {
-    if (key === 'ALL') return jobCards.length;
-    if (key === 'READY_FOR_DELIVERY') {
-      return jobCards.filter((c) => (c.status || '').toUpperCase().includes('READY')).length;
-    }
-
-    return jobCards.filter((c) => {
-      const s = (c.status || '').toUpperCase();
-      const st = (c.serviceType || '').toUpperCase();
-      const isDeliveryOrReject = s.includes('DELIVER') || s.includes('READY') || s.includes('REJECT');
-      const isBodyShop = s.includes('BODY') || st.includes('BODY');
-
-      const assignments = c.workAssignments || c.assignmentHistory || [];
-
-      if (key === 'MECHANICAL') {
-        const mechInfo = getDeptAssignment(assignments, ['mechanical', 'mechanic', 'floor']);
-        return !isBodyShop && !isDeliveryOrReject && mechInfo.mechanic !== null;
-      }
-      if (key === 'BODY_SHOP') {
-        const bodyInfo = getDeptAssignment(assignments, ['body', 'paint', 'denting']);
-        return isBodyShop && !isDeliveryOrReject && bodyInfo.mechanic !== null;
-      }
-      return false;
-    }).length;
+    return jobCards.filter((c) => isCardInTab(c, key)).length;
   };
 
   const filteredCards = jobCards.filter((card) => {
@@ -354,26 +381,7 @@ export function FloorJobCardsScreen({ navigation }) {
       card.owner.toLowerCase().includes(searchQuery.toLowerCase()) ||
       card.mobile.includes(searchQuery);
 
-    const s = (card.status || '').toUpperCase();
-    const st = (card.serviceType || '').toUpperCase();
-    const isReadyForDelivery = s.includes('READY');
-    const isBodyShop = s.includes('BODY') || st.includes('BODY');
-    const isDeliveryOrReject = s.includes('DELIVER') || s.includes('READY') || s.includes('REJECT');
-
-    const assignments = card.workAssignments || card.assignmentHistory || [];
-    const mechInfo = getDeptAssignment(assignments, ['mechanical', 'mechanic', 'floor']);
-    const bodyInfo = getDeptAssignment(assignments, ['body', 'paint', 'denting']);
-
-    let matchesStatus = true;
-    if (selectedStatusFilter === 'ALL') {
-      matchesStatus = true;
-    } else if (selectedStatusFilter === 'READY_FOR_DELIVERY') {
-      matchesStatus = isReadyForDelivery;
-    } else if (selectedStatusFilter === 'MECHANICAL') {
-      matchesStatus = !isBodyShop && !isDeliveryOrReject && mechInfo.mechanic !== null;
-    } else if (selectedStatusFilter === 'BODY_SHOP') {
-      matchesStatus = isBodyShop && !isDeliveryOrReject && bodyInfo.mechanic !== null;
-    }
+    const matchesStatus = isCardInTab(card, selectedStatusFilter);
 
     return matchesSearch && matchesStatus;
   });
@@ -534,11 +542,11 @@ export function FloorJobCardsScreen({ navigation }) {
               let displayBay = item.bay;
 
               if (selectedStatusFilter === 'MECHANICAL') {
-                const mechInfo = getDeptAssignment(assignments, ['mechanical', 'mechanic', 'floor']);
+                const mechInfo = getDeptAssignment(assignments, ['mechanical', 'mechanic', 'floor', 'general service', 'engine', 'electrical']);
                 displayMechanic = mechInfo.mechanic || 'Unassigned';
                 displayBay = mechInfo.bay || 'Unassigned';
               } else if (selectedStatusFilter === 'BODY_SHOP') {
-                const bodyInfo = getDeptAssignment(assignments, ['body', 'paint', 'denting']);
+                const bodyInfo = getDeptAssignment(assignments, ['body', 'paint', 'denting', 'tinkering', 'collision']);
                 displayMechanic = bodyInfo.mechanic || 'Unassigned';
                 displayBay = bodyInfo.bay || 'Unassigned';
               }

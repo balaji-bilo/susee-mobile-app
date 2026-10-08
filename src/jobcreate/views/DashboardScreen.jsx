@@ -43,6 +43,24 @@ export function DashboardScreen({ navigation }) {
 
   const isTablet = width > 768;
 
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const token = await retrieveEncryptedData('token');
+      if (!token) return;
+
+      const response = await axios.get(`${base_url}${notification_count}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data && response.data.success && response.data.data) {
+        const count = response.data.data.count ?? 0;
+        setUnreadCount(Number(count) || 0);
+      }
+    } catch (err) {
+      console.warn('Error fetching unread count on dashboard:', err?.message);
+    }
+  }, []);
+
   useEffect(() => {
     fetchQueue(true);
     fetchUnreadCount();
@@ -54,7 +72,7 @@ export function DashboardScreen({ navigation }) {
       setNavigatingId(null);
     });
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, fetchUnreadCount]);
 
   const fetchQueue = async (isRefreshing = false) => {
     console.log(`${base_url}${job_card}`);
@@ -143,24 +161,6 @@ export function DashboardScreen({ navigation }) {
     } finally {
       setLoading(false);
       setRefreshing(false);
-    }
-  };
-
-  const fetchUnreadCount = async () => {
-    try {
-      const token = await retrieveEncryptedData('token');
-      if (!token) return;
-      const response = await axios.get(`${base_url}${notification_count}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      console.log('Unread Count Response:', response.data);
-      if (response.data && response.data.success && response.data.data) {
-        setUnreadCount(response.data.data.count || 0);
-      }
-    } catch (error) {
-      console.error('Error fetching unread count:', error);
     }
   };
 

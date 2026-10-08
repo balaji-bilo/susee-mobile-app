@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.suseemotors.dvsos">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -7,6 +8,8 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -20,6 +23,12 @@
       android:theme="@style/AppTheme"
       android:supportsRtl="true"
       android:usesCleartextTraffic="true">
+      
+      <!-- Default Notification Icon for Firebase Background Notifications -->
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_icon"
+        android:resource="@drawable/ic_stat_notification" />
+
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

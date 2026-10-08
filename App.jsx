@@ -34,9 +34,11 @@ import { EditSelectedServicesScreen } from './src/floorsupervisor/views/EditSele
 import { AddAdditionalWorkScreen } from './src/floorsupervisor/views/AddAdditionalWorkScreen.jsx';
 import { JobCardImagesScreen } from './src/floorsupervisor/views/JobCardImagesScreen.jsx';
 
-// Shared Storage & Tab Bar
 import { retrieveEncryptedData } from './src/common/config/storage.js';
 import { CustomTabBar } from './src/common/components/CustomTabBar.jsx';
+import { navigationRef } from './src/common/navigation/navigationRef.js';
+import { StageAlertProvider } from './src/common/context/StageAlertContext.jsx';
+import { NotificationService } from './src/jobcreate/config/NotificationService.js';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -161,23 +163,29 @@ function MainTabs({ route }) {
 }
 
 export default function App() {
+  useEffect(() => {
+    NotificationService.init();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Splash">
-          <Stack.Screen name="Splash" component={SplashScreen} />
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="MainTabs" component={MainTabs} />
-          <Stack.Screen name="HistoryDetail" component={HistoryDetailScreen} />
-          <Stack.Screen name="JobCardWizard" component={JobCardWizard} />
-          <Stack.Screen name="RecordDetailScreen" component={RecordDetailScreen} />
-          <Stack.Screen name="FloorJobCardViewScreen" component={FloorJobCardViewScreen} />
-          <Stack.Screen name="EditSelectedServicesScreen" component={EditSelectedServicesScreen} />
-          <Stack.Screen name="AddAdditionalWorkScreen" component={AddAdditionalWorkScreen} />
-          <Stack.Screen name="JobCardImagesScreen" component={JobCardImagesScreen} />
-          <Stack.Screen name="Notification" component={NotificationScreen} />
-        </Stack.Navigator>
+      <NavigationContainer ref={navigationRef}>
+        <StageAlertProvider>
+          <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Splash">
+            <Stack.Screen name="Splash" component={SplashScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="HistoryDetail" component={HistoryDetailScreen} />
+            <Stack.Screen name="JobCardWizard" component={JobCardWizard} />
+            <Stack.Screen name="RecordDetailScreen" component={RecordDetailScreen} />
+            <Stack.Screen name="FloorJobCardViewScreen" component={FloorJobCardViewScreen} />
+            <Stack.Screen name="EditSelectedServicesScreen" component={EditSelectedServicesScreen} />
+            <Stack.Screen name="AddAdditionalWorkScreen" component={AddAdditionalWorkScreen} />
+            <Stack.Screen name="JobCardImagesScreen" component={JobCardImagesScreen} />
+            <Stack.Screen name="Notification" component={NotificationScreen} />
+          </Stack.Navigator>
+        </StageAlertProvider>
       </NavigationContainer>
     </SafeAreaProvider>
   );
