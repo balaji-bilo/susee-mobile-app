@@ -47,64 +47,26 @@ export const getFcmToken = async () => {
 };
 
 export const notification_redirection = async (data = {}) => {
-  console.log('Handling redirection with data:', data);
+  console.log('Handling notification click, redirecting to Notification screen with data:', data);
 
-  const jcId = data.jobCardId || data.id;
-  const geId = data.gateEntryId;
-  const vNo = data.vehicleNumber || data.vehicleNo || '';
-
-  const storedRole = await retrieveEncryptedData('roleName');
-  const normalizedRole = String(storedRole || '').toLowerCase().replace(/\s+/g, '-');
-
-  const nav = (screen, params) => {
+  const navToNotification = () => {
     if (navigationRef.isReady && navigationRef.isReady()) {
-      navigationRef.navigate(screen, params);
+      navigationRef.navigate('Notification', { data });
     } else if (navigationRef.current) {
-      navigationRef.current.navigate(screen, params);
+      navigationRef.current.navigate('Notification', { data });
     } else {
-      console.warn('Navigation reference is not ready yet');
+      console.warn('Navigation reference is not ready yet, retrying in 500ms...');
+      setTimeout(() => {
+        if (navigationRef.isReady && navigationRef.isReady()) {
+          navigationRef.navigate('Notification', { data });
+        } else if (navigationRef.current) {
+          navigationRef.current.navigate('Notification', { data });
+        }
+      }, 500);
     }
   };
 
-  const msg = `${data.title || ''} ${data.message || data.body || ''}`.toLowerCase();
-  const isAssignMechanic =
-    msg.includes('unassigned') ||
-    msg.includes('assignment_pending') ||
-    msg.includes('assignment pending') ||
-    msg.includes('without a mechanic') ||
-    msg.includes('without a bay') ||
-    msg.includes('assign mechanic') ||
-    msg.includes('assign technician') ||
-    msg.includes('assign bay') ||
-    /\b(assignment\s*pending|pending\s*assignment)\b/i.test(msg) ||
-    /\bassign\s*(mechanic|technician|bay)\b/i.test(msg);
-
-  if (normalizedRole === 'floor-supervisor' || normalizedRole === 'manager') {
-    if (isAssignMechanic) {
-      nav('AssignMechanic', { jobCardId: jcId, vehicleNo: vNo });
-      return;
-    }
-    if (jcId) {
-      nav('FloorJobCardViewScreen', { jobCardId: jcId, vehicleNo: vNo });
-      return;
-    }
-    nav('FloorJobCards');
-    return;
-  }
-
-  if (normalizedRole === 'crm-team' && (geId || vNo)) {
-    nav('JobCardWizard', {
-      selectedVehicle: {
-        id: String(geId || Date.now()),
-        gateEntryId: geId,
-        vehicleNumber: vNo,
-        entryType: 'SERVICE',
-      },
-    });
-    return;
-  }
-
-  nav('Notification');
+  navToNotification();
 };
 
 const setupNotificationChannel = async () => {
@@ -122,22 +84,56 @@ const setupNotificationChannel = async () => {
   }
 };
 
+let isListenersAttached = false;
+let memoryDeviceId = null;
+const recentMessageCache = new Map();
+
 const listenToMessages = () => {
+  if (isListenersAttached) {
+    console.log('[NotificationService] Listeners already attached, skipping duplicate attachment.');
+    return;
+  }
+  isListenersAttached = true;
+
   messaging().onMessage(async (remoteMessage) => {
     console.log('Foreground notification received:', remoteMessage);
 
     if (remoteMessage.notification) {
       try {
+        const notifId = remoteMessage.data?.notificationId
+          ? `dvsos_${remoteMessage.data.notificationId}`
+          : (remoteMessage.messageId || `dvsos_${Date.now()}`);
+
+        const now = Date.now();
+        // Check if recently handled within 15 seconds
+        if (recentMessageCache.has(notifId)) {
+          const lastTime = recentMessageCache.get(notifId);
+          if (now - lastTime < 15000) {
+            console.log('[NotificationService] Ignoring duplicate notification payload:', notifId);
+            return;
+          }
+        }
+        recentMessageCache.set(notifId, now);
+
+        // Keep cache bounded
+        if (recentMessageCache.size > 50) {
+          for (const [k, time] of recentMessageCache.entries()) {
+            if (now - time > 60000) recentMessageCache.delete(k);
+          }
+        }
+
         await notifee.requestPermission();
         await setupNotificationChannel();
 
         await notifee.displayNotification({
+          id: notifId,
           title: remoteMessage.notification.title,
           body: remoteMessage.notification.body,
           android: {
             channelId: 'default',
             importance: AndroidImportance.HIGH,
             smallIcon: 'ic_stat_notification',
+            tag: notifId,
             pressAction: {
               id: 'default',
             },
@@ -173,10 +169,6 @@ const listenToMessages = () => {
       }
     });
 
-  messaging().setBackgroundMessageHandler(async (remoteMessage) => {
-    console.log('Notification received in background/quit state:', remoteMessage);
-  });
-
   messaging().onTokenRefresh(async (newToken) => {
     console.log('FCM Token refreshed:', newToken);
     await storeEncryptedData('fcm_token', newToken);
@@ -186,16 +178,19 @@ const listenToMessages = () => {
 };
 
 const getOrCreateDeviceId = async () => {
+  if (memoryDeviceId) return memoryDeviceId;
   try {
     let deviceId = await retrieveEncryptedData('deviceId');
     if (!deviceId) {
       deviceId = 'dev-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
       await storeEncryptedData('deviceId', deviceId);
     }
+    memoryDeviceId = deviceId;
     return deviceId;
   } catch (err) {
     console.error('Error in getOrCreateDeviceId:', err);
-    return 'dev-fallback-' + Date.now();
+    memoryDeviceId = memoryDeviceId || ('dev-fallback-' + Date.now());
+    return memoryDeviceId;
   }
 };
 

@@ -102,6 +102,8 @@ export function FloorJobCardsScreen({ navigation }) {
             bay: item.bay?.bayName || item.bay?.bayCode || item.assignedBay?.bayName || item.assignedBay?.bayCode || 'Unassigned',
             estCost: `₹${(item.totalEstimate || 0).toLocaleString('en-IN')}`,
             created: item.createdAt ? new Date(item.createdAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : '',
+            createdAt: item.createdAt,
+            updatedAt: item.updatedAt,
             workAssignments: item.workAssignments || [],
             assignmentHistory: item.assignmentHistory || [],
             selectedServices: (item.services || []).map(s => ({
@@ -194,8 +196,8 @@ export function FloorJobCardsScreen({ navigation }) {
 
               // Use the real job card status code from deriveJobCardStatus() on the backend
               const statusCode = String(item.currentStatus?.statusCode || '').toUpperCase();
-              const isMechanicalPhase  = statusCode.includes('MECHANICAL');
-              const isBodyShopPhase    = statusCode.includes('BODY_SHOP');
+              const isMechanicalPhase = statusCode.includes('MECHANICAL');
+              const isBodyShopPhase = statusCode.includes('BODY_SHOP');
               const isReadyOrDelivered = statusCode.includes('READY_FOR_DELIVERY') || statusCode.includes('DELIVERED');
 
               // Does this job have any body-shop category services?
@@ -208,30 +210,30 @@ export function FloorJobCardsScreen({ navigation }) {
               // Mechanical: completed once job moves past it; active while in mechanical; pending if not started
               const mechanicalStatus =
                 isReadyOrDelivered || isBodyShopPhase ? 'completed' :
-                isMechanicalPhase || mechanicName !== 'Unassigned' ? 'active' : 'pending';
+                  isMechanicalPhase || mechanicName !== 'Unassigned' ? 'active' : 'pending';
 
               // Body Shop: pending (grayed) if no body-shop services exist on this job
               const bodyShopStatus =
-                !hasBodyShopServices  ? 'pending' :
-                isReadyOrDelivered    ? 'completed' :
-                isBodyShopPhase       ? 'active' : 'pending';
+                !hasBodyShopServices ? 'pending' :
+                  isReadyOrDelivered ? 'completed' :
+                    isBodyShopPhase ? 'active' : 'pending';
 
               // Customer Approvals: pending if no approvals at all (not falsely green)
               const approvals = item.approvals || [];
               const approvalStatus =
-                approvals.length === 0    ? 'pending' :
-                pendingApprovalsCount > 0 ? 'active'  : 'completed';
+                approvals.length === 0 ? 'pending' :
+                  pendingApprovalsCount > 0 ? 'active' : 'completed';
               const approvalDesc =
-                approvals.length === 0    ? 'No approval required' :
-                pendingApprovalsCount > 0 ? `Pending — ${pendingApprovalsCount} items awaiting` : 'All approved';
+                approvals.length === 0 ? 'No approval required' :
+                  pendingApprovalsCount > 0 ? `Pending — ${pendingApprovalsCount} items awaiting` : 'All approved';
 
               return [
-                { id: 1, title: 'Vehicle Entry',      desc: `${entryDate} · Gate Security`,                          status: 'completed' },
-                { id: 2, title: 'Job Card Created',   desc: `${createdDate} · CRM Team · ${estCostString} est.`,     status: 'completed' },
-                { id: 3, title: 'Mechanical Work',    desc: `Assigned to ${mechanicName} · ${bayName}`,              status: mechanicalStatus },
-                { id: 4, title: 'Customer Approvals', desc: approvalDesc,                                             status: approvalStatus },
-                { id: 5, title: 'Body Shop',          desc: hasBodyShopServices ? 'Body Shop Work' : 'Not required', status: bodyShopStatus },
-                { id: 6, title: 'Vehicle Delivery',   desc: isJobDelivered ? 'Delivered' : `Expected: ${expDel}`,    status: isJobDelivered ? 'completed' : 'pending' },
+                { id: 1, title: 'Vehicle Entry', desc: `${entryDate} · Gate Security`, status: 'completed' },
+                { id: 2, title: 'Job Card Created', desc: `${createdDate} · CRM Team · ${estCostString} est.`, status: 'completed' },
+                { id: 3, title: 'Mechanical Work', desc: `Assigned to ${mechanicName} · ${bayName}`, status: mechanicalStatus },
+                { id: 4, title: 'Customer Approvals', desc: approvalDesc, status: approvalStatus },
+                { id: 5, title: 'Body Shop', desc: hasBodyShopServices ? 'Body Shop Work' : 'Not required', status: bodyShopStatus },
+                { id: 6, title: 'Vehicle Delivery', desc: isJobDelivered ? 'Delivered' : `Expected: ${expDel}`, status: isJobDelivered ? 'completed' : 'pending' },
               ];
             })(),
             photos: (() => {
@@ -322,9 +324,9 @@ export function FloorJobCardsScreen({ navigation }) {
       });
       return (
         (code === 'MECHANICAL_ASSIGNED' ||
-        code === 'MECHANICAL_IN_PROGRESS' ||
-        status.includes('MECHANICAL ASSIGNED') ||
-        status.includes('MECHANICAL IN PROGRESS')) &&
+          code === 'MECHANICAL_IN_PROGRESS' ||
+          status.includes('MECHANICAL ASSIGNED') ||
+          status.includes('MECHANICAL IN PROGRESS')) &&
         hasMechanicalAssignment
       );
     }
@@ -336,20 +338,31 @@ export function FloorJobCardsScreen({ navigation }) {
       });
       return (
         (code === 'BODY_SHOP_ASSIGNED' ||
-        code === 'BODY_SHOP_IN_PROGRESS' ||
-        status.includes('BODY SHOP ASSIGNED') ||
-        status.includes('BODY SHOP IN PROGRESS')) &&
+          code === 'BODY_SHOP_IN_PROGRESS' ||
+          status.includes('BODY SHOP ASSIGNED') ||
+          status.includes('BODY SHOP IN PROGRESS')) &&
         hasBodyShopAssignment
       );
     }
     if (tabKey === 'READY_FOR_DELIVERY') {
+      const isDelivered =
+        code === 'DELIVERED' ||
+        code === 'VEHICLE_DELIVERED' ||
+        (code.includes('DELIVERED') && !code.includes('READY')) ||
+        (status.includes('DELIVERED') && !status.includes('READY')) ||
+        status === 'DELIVERED' ||
+        status === 'VEHICLE DELIVERED';
+
+      if (isDelivered) {
+        return false;
+      }
+
       return (
         code === 'READY_FOR_DELIVERY' ||
         code === 'READY_FOR_DELIVERED' ||
-        code === 'DELIVERED' ||
-        code === 'VEHICLE_DELIVERED' ||
-        status.includes('READY') ||
-        status.includes('DELIVER')
+        code.includes('READY_FOR_DELIVERY') ||
+        status.includes('READY FOR DELIVERY') ||
+        status.includes('READY')
       );
     }
     return false;
@@ -374,17 +387,60 @@ export function FloorJobCardsScreen({ navigation }) {
     return jobCards.filter((c) => isCardInTab(c, key)).length;
   };
 
-  const filteredCards = jobCards.filter((card) => {
-    const matchesSearch =
-      card.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      card.vehicleNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      card.owner.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      card.mobile.includes(searchQuery);
+  const getCardUpdatedTime = (card) => {
+    let latest = card.updatedAt ? new Date(card.updatedAt).getTime() : 0;
+    if (card.workAssignments && Array.isArray(card.workAssignments)) {
+      for (const a of card.workAssignments) {
+        const timeVal = a.updatedAt || a.startedAt || a.createdAt;
+        if (timeVal) {
+          const t = new Date(timeVal).getTime();
+          if (t > latest) latest = t;
+        }
+      }
+    }
+    if (card.assignmentHistory && Array.isArray(card.assignmentHistory)) {
+      for (const a of card.assignmentHistory) {
+        const timeVal = a.updatedAt || a.startedAt || a.createdAt;
+        if (timeVal) {
+          const t = new Date(timeVal).getTime();
+          if (t > latest) latest = t;
+        }
+      }
+    }
+    if (!latest && card.createdAt) {
+      latest = new Date(card.createdAt).getTime();
+    }
+    return latest;
+  };
 
-    const matchesStatus = isCardInTab(card, selectedStatusFilter);
+  const getCardCreatedTime = (card) => {
+    return card.createdAt ? new Date(card.createdAt).getTime() : 0;
+  };
 
-    return matchesSearch && matchesStatus;
-  });
+  const filteredCards = jobCards
+    .filter((card) => {
+      const matchesSearch =
+        card.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        card.vehicleNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        card.owner.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        card.mobile.includes(searchQuery);
+
+      const matchesStatus = isCardInTab(card, selectedStatusFilter);
+
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => {
+      // In Mechanical and Body Shop tabs: show updated data first (updatedAt desc)
+      if (selectedStatusFilter === 'MECHANICAL' || selectedStatusFilter === 'BODY_SHOP') {
+        const timeA = getCardUpdatedTime(a);
+        const timeB = getCardUpdatedTime(b);
+        return timeB - timeA;
+      }
+      // For All and Ready for Delivery: sort by createdAt desc
+      const timeA = getCardCreatedTime(a);
+      const timeB = getCardCreatedTime(b);
+      return timeB - timeA;
+    });
 
   const getStatusColor = (status) => {
     if (status.includes('Ready for Delivery')) return { bg: '#EFF6FF', text: '#2563EB', border: '#BFDBFE' };
@@ -427,6 +483,7 @@ export function FloorJobCardsScreen({ navigation }) {
             mechanic: technician || card.mechanic,
             bay: bay || card.bay,
             status: 'Mechanical Assigned',
+            updatedAt: new Date().toISOString(),
           };
         }
         return card;
@@ -434,6 +491,7 @@ export function FloorJobCardsScreen({ navigation }) {
     );
     setAssignModalVisible(false);
     setSelectedCardForAssign(null);
+    fetchJobCards(true);
   };
 
   return (
@@ -483,26 +541,26 @@ export function FloorJobCardsScreen({ navigation }) {
                   </Text>
                   <View
                     style={[
-                    styles.tabBadge,
-                    isActive ? styles.tabBadgeActive : styles.tabBadgeInactive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.tabBadgeText,
-                      isActive
-                        ? styles.tabBadgeTextActive
-                        : styles.tabBadgeTextInactive,
+                      styles.tabBadge,
+                      isActive ? styles.tabBadgeActive : styles.tabBadgeInactive,
                     ]}
                   >
-                    {count}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
+                    <Text
+                      style={[
+                        styles.tabBadgeText,
+                        isActive
+                          ? styles.tabBadgeTextActive
+                          : styles.tabBadgeTextInactive,
+                      ]}
+                    >
+                      {count}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
 
         {/* Job Cards List */}
         {isLoading ? (

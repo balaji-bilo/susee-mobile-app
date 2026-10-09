@@ -361,7 +361,13 @@ export function AssignMechanicScreen() {
             ref={flatListRef}
             data={requests}
             keyExtractor={(item, index) => item.id + '_' + index.toString()}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
+            style={{ flex: 1 }}
+            contentContainerStyle={[
+              styles.scrollContent,
+              requests.length === 0
+                ? { flexGrow: 1, justifyContent: 'center', paddingBottom: 80 + insets.bottom }
+                : { paddingBottom: 130 + insets.bottom },
+            ]}
             showsVerticalScrollIndicator={false}
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5}
@@ -1063,20 +1069,24 @@ const styles = StyleSheet.create({
   },
 
   emptyContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 50,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
   },
   emptyTitle: {
     fontSize: 15,
     fontFamily: fonts.interBold,
     color: '#0F172A',
+    textAlign: 'center',
   },
   emptySubtitle: {
     fontSize: 12,
     fontFamily: fonts.inter,
     color: '#64748B',
     marginTop: 4,
+    textAlign: 'center',
   },
 
   /* Skip Confirmation Modal Styles */

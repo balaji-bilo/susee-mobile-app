@@ -399,48 +399,127 @@ export function FloorJobCardViewScreen({ route, navigation }) {
 
         const createdDate = item.createdAt ? new Date(item.createdAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Pending';
         const entryDate = item.gateEntry?.entryTime ? new Date(item.gateEntry.entryTime).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : createdDate;
-        const estCostString = `₹${(item.totalEstimate || 0).toLocaleString('en-IN')}`;
-        const pendingApprovalsCount = (item.approvals || []).filter(a => String(a.statusCode || a.customerResponse || a.status || '').toUpperCase().includes('PENDING')).length;
-        const isJobDelivered = String(item.currentStatus?.statusCode || item.status || '').toUpperCase().includes('DELIVERED');
-        const mechanicName = item.technician || (item.assignedMechanics?.length > 0 ? item.assignedMechanics.map(m => m.fullName).join(', ') : 'Unassigned');
-        const bayName = item.bay?.bayName || item.bay?.bayCode || item.assignedBay?.bayName || item.assignedBay?.bayCode || 'Unassigned';
+        const estCostString = `₹${(grandTotal || item.totalEstimate || 0).toLocaleString('en-IN')}`;
         const expDel = item.expectedDeliveryAt ? new Date(item.expectedDeliveryAt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : 'Pending';
+        const entryActor = item.gateEntry?.createdByUser?.fullName || item.gateEntry?.enteredBy?.fullName || 'Gate Security';
+        const creatorActor = item.advisor?.fullName || item.createdByUser?.fullName || 'CRM Team';
 
-        const statusCode = String(item.currentStatus?.statusCode || '').toUpperCase();
-        const isMechanicalPhase = statusCode.includes('MECHANICAL');
-        const isBodyShopPhase = statusCode.includes('BODY_SHOP');
-        const isReadyOrDelivered = statusCode.includes('READY_FOR_DELIVERY') || statusCode.includes('DELIVERED');
+        // ── Exact web-matching job progress logic (mirrors JobCardDetailPage.jsx) ──
+        const _isServiceBodyshop = (s) => {
+          const cat = String(s.categorySlug || s.serviceItem?.category?.slug || s.category?.slug || s.serviceItem?.category?.name || s.category?.name || '').toLowerCase();
+          if (cat && (cat.includes('body') || cat.includes('mechanic'))) return cat.includes('body');
+          const name = String(s.serviceName || s.name || s.serviceItem?.name || '').toLowerCase();
+          return name.includes('body') || name.includes('denting') || name.includes('paint');
+        };
+        const _isAssignmentBodyshop = (a) => {
+          const cat = String(a.jobCardService?.serviceItem?.category?.slug || a.service?.category?.slug || a.jobCardService?.serviceItem?.category?.name || a.service?.category?.name || '').toLowerCase();
+          if (cat && (cat.includes('body') || cat.includes('mechanic'))) return cat.includes('body');
+          return cat.includes('body') || cat.includes('denting') || cat.includes('paint');
+        };
+        const _getAssignmentStatusValue = (a) => {
+          const code = String(a?.status?.statusCode || a?.status?.code || '').toUpperCase();
+          if (code.includes('ON_HOLD') || code.includes('POSTPONED')) return 'ON_HOLD';
+          if (code.includes('COMPLETED')) return 'COMPLETED';
+          if (code.includes('IN_PROGRESS')) return 'IN_PROGRESS';
+          return 'ASSIGNED';
+        };
 
-        const hasBodyShopServices = (item.services || []).some(s => {
-          const slug = String(s.serviceItem?.category?.slug || '').toLowerCase();
-          const catName = String(s.serviceItem?.category?.name || '').toLowerCase();
-          return slug.includes('body') || catName.includes('body');
-        });
+        const tlAllServices = (item.services || []).map(s => ({
+          name: s.serviceName || s.serviceItem?.name || s.name || 'Unknown',
+          status: s.serviceStatus?.statusCode || s.serviceStatus?.code || s.status || 'PENDING',
+          categorySlug: s.categorySlug || s.category?.slug || s.serviceItem?.category?.slug || '',
+          category: s.category || s.serviceItem?.category,
+          serviceItem: s.serviceItem,
+          isAdditional: !!s.isAdditional,
+        }));
+        const tlAssignments = (item.workAssignments || []).filter(a => a?.assignedUser || a?.jobCardService || a?.service);
 
-        const mechanicalStatus =
-          isReadyOrDelivered || isBodyShopPhase ? 'completed' :
-            isMechanicalPhase || mechanicName !== 'Unassigned' ? 'active' : 'pending';
+        const _hasBodyshopWork = tlAllServices.some(_isServiceBodyshop) || tlAssignments.some(_isAssignmentBodyshop);
+        const _hasMechanicalWork = tlAllServices.some(s => !_isServiceBodyshop(s)) || tlAssignments.some(a => !_isAssignmentBodyshop(a));
 
-        const bodyShopStatus =
-          !hasBodyShopServices ? 'pending' :
-            isReadyOrDelivered ? 'completed' :
-              isBodyShopPhase ? 'active' : 'pending';
+        const _mechAssignments = tlAssignments.filter(a => !_isAssignmentBodyshop(a));
+        const _bodyAssignments = tlAssignments.filter(a => _isAssignmentBodyshop(a));
 
-        const approvals = item.approvals || [];
-        const approvalStatus =
-          approvals.length === 0 ? 'pending' :
-            pendingApprovalsCount > 0 ? 'active' : 'completed';
-        const approvalDesc =
-          approvals.length === 0 ? 'No approval required' :
-            pendingApprovalsCount > 0 ? `Pending — ${pendingApprovalsCount} items awaiting` : 'All approved';
+        const _isMechDone = _hasMechanicalWork && (
+          _mechAssignments.length > 0
+            ? _mechAssignments.every(a => !!a.completedAt || _getAssignmentStatusValue(a) === 'COMPLETED')
+            : tlAllServices.filter(s => !_isServiceBodyshop(s)).every(s => s.status === 'COMPLETED' || s.status === 'REJECTED')
+        );
+        const _isBodyDone = _hasBodyshopWork && (
+          _bodyAssignments.length > 0
+            ? _bodyAssignments.every(a => !!a.completedAt || _getAssignmentStatusValue(a) === 'COMPLETED')
+            : tlAllServices.filter(s => _isServiceBodyshop(s)).every(s => s.status === 'COMPLETED' || s.status === 'REJECTED')
+        );
+        const _isMechActive = _mechAssignments.some(a => { const st = _getAssignmentStatusValue(a); return st === 'IN_PROGRESS' || st === 'ASSIGNED'; });
+        const _isBodyActive = _bodyAssignments.some(a => { const st = _getAssignmentStatusValue(a); return st === 'IN_PROGRESS' || st === 'ASSIGNED'; });
+        const _isMechPostponed = tlAllServices.filter(s => !_isServiceBodyshop(s)).some(s => s.status === 'POSTPONED');
+        const _isBodyPostponed = tlAllServices.filter(s => _isServiceBodyshop(s)).some(s => s.status === 'POSTPONED');
+        const _isMechWorking = _mechAssignments.some(a => a.startedAt || _getAssignmentStatusValue(a) === 'IN_PROGRESS');
+        const _isBodyWorking = _bodyAssignments.some(a => a.startedAt || _getAssignmentStatusValue(a) === 'IN_PROGRESS');
+
+        const _mechState = !_hasMechanicalWork ? 'completed'
+          : (_isMechDone ? 'completed' : (_isMechActive ? 'active' : (_mechAssignments.length === 0 ? 'in_progress' : 'pending')));
+        const _bodyState = !_hasBodyshopWork ? 'completed'
+          : (_isBodyDone ? 'completed' : (_isBodyActive ? 'active' : (_bodyAssignments.length === 0 ? 'in_progress' : 'pending')));
+
+        const _pendingApprovals = (item.approvals || []).filter(a => String(a.statusCode || a.customerResponse || a.status || '').toUpperCase().includes('PENDING')).length;
+        const _isDelivered = String(item.currentStatus?.statusCode || item.status || '').toUpperCase().includes('DELIVERED');
+        const _deliveryState = _isDelivered ? 'completed'
+          : ((!_hasMechanicalWork || _isMechDone) && (!_hasBodyshopWork || _isBodyDone) && _pendingApprovals === 0 ? 'active' : 'pending');
+
+        const _activeMech = _mechAssignments.find(a => !a.completedAt) || _mechAssignments[0] || {};
+        const _mechName = _activeMech.assignedUser?.fullName || 'Unassigned';
+        const _mechBay = _activeMech.bay?.bayName || _activeMech.bay?.bayCode || _activeMech.bay?.name || '—';
+        const _activeBody = _bodyAssignments.find(a => !a.completedAt) || _bodyAssignments[0] || {};
+        const _bodyName = _activeBody.assignedUser?.fullName || 'Unassigned';
+        const _additionalSvcs = tlAllServices.filter(s => s.isAdditional);
 
         const newJobProgressSteps = [
-          { id: 1, title: 'Vehicle Entry', desc: `${entryDate} · Gate Security`, status: 'completed' },
-          { id: 2, title: 'Job Card Created', desc: `${createdDate} · CRM Team · ${estCostString} est.`, status: 'completed' },
-          { id: 3, title: 'Mechanical Work', desc: `Assigned to ${mechanicName} · ${bayName}`, status: mechanicalStatus },
-          { id: 4, title: 'Customer Approvals', desc: approvalDesc, status: approvalStatus },
-          { id: 5, title: 'Body Shop', desc: hasBodyShopServices ? 'Body Shop Work' : 'Not required', status: bodyShopStatus },
-          { id: 6, title: 'Vehicle Delivery', desc: isJobDelivered ? 'Delivered' : `Expected: ${expDel}`, status: isJobDelivered ? 'completed' : 'pending' },
+          {
+            id: 1, title: 'Vehicle Entry',
+            desc: `${entryDate} · ${entryActor}`,
+            status: 'completed',
+          },
+          {
+            id: 2, title: 'Job Card Created',
+            desc: `${createdDate} · ${creatorActor} · ${estCostString} est.`,
+            status: 'completed',
+          },
+          {
+            id: 3, title: 'Mechanical Work',
+            desc: !_hasMechanicalWork ? 'N/A (No Mechanical Services)'
+              : (_isMechDone ? 'Mechanical Work Completed'
+                : (_isMechPostponed ? 'Postponed'
+                  : (_mechAssignments.length > 0
+                    ? (_isMechWorking ? `In Progress by ${_mechName}` : `Assigned to ${_mechName}${_mechBay !== '—' ? ` · ${_mechBay}` : ''}`)
+                    : 'Pending Assignment'))),
+            status: _mechState,
+          },
+          {
+            id: 4, title: 'Customer Approvals',
+            desc: _pendingApprovals > 0
+              ? `Pending — ${_pendingApprovals} item${_pendingApprovals > 1 ? 's' : ''} awaiting`
+              : (_additionalSvcs.length > 0 ? 'All additional work approved' : 'No pending approval'),
+            status: _pendingApprovals > 0 ? 'active' : 'completed',
+          },
+          {
+            id: 5, title: 'Body Shop',
+            desc: !_hasBodyshopWork ? 'N/A (No Body Shop Services)'
+              : (_isBodyDone ? 'Body Shop Work Completed'
+                : (_isBodyPostponed ? 'Postponed'
+                  : (_bodyAssignments.length > 0
+                    ? (_isBodyWorking ? `In Progress by ${_bodyName}` : `Assigned to ${_bodyName}`)
+                    : 'Pending Body Shop Work'))),
+            status: _bodyState,
+          },
+          {
+            id: 6, title: 'Vehicle Delivery',
+            desc: _isDelivered ? 'Vehicle Delivered'
+              : (_deliveryState === 'active'
+                ? `Ready for Delivery — Expected: ${expDel}`
+                : `Expected: ${expDel}`),
+            status: _deliveryState,
+          },
         ];
 
         setCardData(prev => ({
@@ -558,7 +637,6 @@ export function FloorJobCardViewScreen({ route, navigation }) {
 
           {/* JOB PROGRESS */}
 
-
           {/* 1. Vehicle & Owner Details */}
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderRow}>
@@ -612,47 +690,8 @@ export function FloorJobCardViewScreen({ route, navigation }) {
               </View>
             </View>
           </View>
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeaderRow}>
-              <MapPin size={16} color="#EF4444" style={{ marginRight: 6 }} />
-              <Text style={[styles.sectionTitle, { color: '#475569', letterSpacing: 0.5 }]}>JOB PROGRESS</Text>
-            </View>
+          <JobProgressTimeline steps={jobProgressSteps} />
 
-            <View style={styles.timelineContainer}>
-              {jobProgressSteps.map((step, index) => {
-                const isLast = index === jobProgressSteps.length - 1;
-                let color = '#CBD5E1'; // pending
-                let lineStyle = { backgroundColor: '#E2E8F0' }; // default gray line
-
-                if (step.status === 'completed') {
-                  color = '#059669'; // Emerald
-                  lineStyle = { backgroundColor: '#A7F3D0' };
-                } else if (step.status === 'active') {
-                  color = '#2563EB'; // Blue
-                  lineStyle = { backgroundColor: '#BFDBFE' }; // light blue line
-                }
-
-                return (
-                  <View key={step.id} style={styles.timelineRow}>
-                    <View style={styles.timelineIconCol}>
-                      <View style={[styles.timelineCircle, { borderColor: color }]}>
-                        {step.status !== 'pending' && (
-                          <View style={[styles.timelineDot, { backgroundColor: color }]} />
-                        )}
-                      </View>
-                      {!isLast && (
-                        <View style={[styles.timelineLine, lineStyle]} />
-                      )}
-                    </View>
-                    <View style={[styles.timelineTextCol, isLast && { paddingBottom: 0 }]}>
-                      <Text style={styles.timelineTitle}>{step.title}</Text>
-                      <Text style={styles.timelineDesc}>{step.desc}</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
           {/* 2. Selected Services */}
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderBetween}>
@@ -1563,4 +1602,102 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F172A',
     borderRadius: 2,
   },
+});
+
+// ─── Job Progress Timeline Component (matches web JobCardDetailPage.jsx) ──────
+function getStepStyle(state) {
+  switch (state) {
+    case 'completed': return { dot: '#1F8E57', border: '#1F8E57', bg: '#E5F7EE' };
+    case 'active': return { dot: '#000F7E', border: '#000F7E', bg: '#EFF6FF' };
+    case 'in_progress': return { dot: '#C98414', border: '#C98414', bg: '#FFF4D8' };
+    default: return { dot: '#CBD5E1', border: '#CBD5E1', bg: '#F1F5F9' };
+  }
+}
+
+function JobProgressTimeline({ steps }) {
+  return (
+    <View style={tlStyles.card}>
+      {/* Static header — no toggle */}
+      <View style={tlStyles.header}>
+        {/* <View style={tlStyles.headerDot} /> */}
+        <Text style={tlStyles.headerTitle}>JOB PROGRESS</Text>
+      </View>
+
+      <View style={tlStyles.body}>
+        {steps.map((step, idx) => {
+          const style = getStepStyle(step.status);
+          const isLast = idx === steps.length - 1;
+          const isPostponed = step.desc === 'Postponed';
+
+          return (
+            <View key={step.id} style={tlStyles.stepRow}>
+              <View style={tlStyles.leftCol}>
+                <View style={[tlStyles.dot, { borderColor: style.border, backgroundColor: style.bg }]}>
+                  {step.status !== 'pending' && (
+                    <View style={[tlStyles.dotInner, { backgroundColor: style.dot }]} />
+                  )}
+                </View>
+                {!isLast && (
+                  <View style={[tlStyles.line, { backgroundColor: step.status === 'completed' ? '#1F8E57' : '#E2E8F0' }]} />
+                )}
+              </View>
+              <View style={[tlStyles.content, isLast && { paddingBottom: 0 }]}>
+                <Text style={[tlStyles.stepTitle, step.status === 'pending' && { color: '#94A3B8' }]}>
+                  {step.title}
+                </Text>
+                <Text style={[
+                  tlStyles.stepSubtitle,
+                  isPostponed && { color: '#C98414', fontWeight: '600' },
+                  step.status === 'pending' && { color: '#CBD5E1' },
+                ]}>
+                  {step.desc}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+const tlStyles = StyleSheet.create({
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  headerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#1F8E57' },
+  headerTitle: { fontSize: 11.5, fontWeight: '800', letterSpacing: 1.2, color: '#334155' },
+  body: {
+    paddingHorizontal: 16, paddingBottom: 16, paddingTop: 4,
+  },
+  stepRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 56 },
+  leftCol: { width: 26, alignItems: 'center', marginRight: 12 },
+  dot: {
+    width: 22, height: 22, borderRadius: 11, borderWidth: 2,
+    alignItems: 'center', justifyContent: 'center', marginTop: 12, zIndex: 2,
+  },
+  dotInner: { width: 9, height: 9, borderRadius: 5 },
+  line: { width: 2, flex: 1, minHeight: 20, marginTop: 2, borderRadius: 1 },
+  content: { flex: 1, paddingTop: 10, paddingBottom: 14 },
+  stepTitle: { fontSize: 13.5, fontWeight: '700', color: '#0F172A', marginBottom: 3 },
+  stepSubtitle: { fontSize: 12, color: '#64748B', fontWeight: '400', lineHeight: 17 },
 });
